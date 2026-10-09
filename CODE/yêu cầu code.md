@@ -48,25 +48,36 @@ Tài liệu này định nghĩa chi tiết các yêu cầu kiến trúc, chức 
 
 Thư mục mã nguồn được phân chia rõ ràng theo mô hình Layered Architecture:
 
-```text
-CHAT_P2P/
+```đề xuất 
+CHATP2P/
+├── README.md                    # Ghi rõ: MAX_CONCURRENT, quy tắc trùng tên
+├── requirements.txt             # tkinterdnd2, pytest
+├── config.py                    # HOST, PORT, MAX_CONCURRENT, CHUNK_SIZE, UPLOAD_DIR
 │
-├── core/                   # Phân hệ Mạng & P2P Core
-│   ├── discovery.py        # Lắng nghe & phát tín hiệu UDP Broadcast
-│   ├── listener.py         # Lắng nghe kết nối TCP ngầm
-│   └── socket_client.py    # Khởi tạo kết nối TCP gửi tin nhắn
+├── server/
+│   ├── main.py                  # Khởi động server asyncio
+│   ├── handler.py               # Nhận file_meta + chunk, ghi đĩa, trả ACK
+│   ├── storage.py               # resolve_filename() xử lý trùng tên, ghi file .part rồi rename
+│   └── uploads/                 # Nơi lưu file nhận được
 │
-├── transfers/              # Phân hệ Xử lý truyền file & Hàng đợi
-│   ├── file_sender.py      # Cắt nhỏ file và gửi chunk dữ liệu
-│   ├── file_receiver.py    # Nhận chunk dữ liệu và ghép thành file
-│   └── queue_manager.py    # Quản lý hàng đợi & giới hạn truyền đồng thời
+├── client/
+│   ├── main.py                  # Khởi động GUI
+│   ├── core/
+│   │   ├── upload_task.py       # Class UploadTask: path, size, status, sent, speed, error
+│   │   ├── upload_manager.py    # Hàng đợi + Semaphore + chạy các task song song
+│   │   ├── uploader.py          # Kết nối server, gửi meta + chunk, báo tiến trình qua callback
+│   │   └── speed_meter.py       # Tính tốc độ (byte/s) theo cửa sổ trượt
+│   ├── ui/
+│   │   ├── app.py               # Cửa sổ chính, vùng kéo thả
+│   │   ├── file_row.py          # 1 dòng: tên, size, trạng thái, progress bar, tốc độ, nút Hủy
+│   │   └── dnd.py               # Gắn drag & drop
+│   └── utils/
+│       └── format.py            # Định dạng KB/MB, KB/s
 │
-├── gui/                    # Phân hệ Giao diện Người dùng
-│   ├── main_window.py      # Màn hình chính & hiển thị danh sách Peer
-│   ├── chat_panel.py       # Khung trò chuyện 1-1
-│   └── transfer_panel.py   # Bảng kéo thả file & Thanh tiến trình
+├── shared/
+│   └── protocol.py              # Đóng gói message (4 byte độ dài + JSON/binary)
 │
-├── config.py               # Cấu hình hệ thống (Port, Chunk Size, Paths)
-├── REQUIREMENTS.md         # Tài liệu yêu cầu kỹ thuật
-└── main.py                 # File khởi chạy ứng dụng (Entry Point)
-```
+└── tests/
+    ├── test_storage_rename.py   # Test quy tắc trùng tên
+    ├── test_upload_manager.py   # Test giới hạn đồng thời, lỗi cô lập
+    └── test_protocol.py         
