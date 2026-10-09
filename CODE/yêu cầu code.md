@@ -44,7 +44,7 @@ Tài liệu này định nghĩa chi tiết các yêu cầu kiến trúc, chức 
 
 ---
 
-## 3. Quy chuẩn Cấu trúc Mã nguồn (Project Structure)
+## 3. Quy chuẩn Cấu trúc Mã nguồn (Project Structure) ( đề xuất phương án )
 
 Thư mục mã nguồn được phân chia rõ ràng theo mô hình Layered Architecture:
 
