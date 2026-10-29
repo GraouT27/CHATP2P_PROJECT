@@ -222,3 +222,5 @@ __marimo__/
 # Python cache
 __pycache__/
 *.py[cod]
+.vs/
+.pytest_cache/
