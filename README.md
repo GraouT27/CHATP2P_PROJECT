@@ -17,7 +17,7 @@
 * `docs/`: Tài liệu SRS, sơ đồ kiến trúc mạng P2P và kịch bản kiểm thử
 
 ## 4. Quản lý dự án 
-* **File Excel Quản lý Tiến độ:** [Link Google Sheets Quản Lý Dự Án](https://docs.google.com/spreadsheets/d/1Asqg1dyDwXAAtwNf0L-CD0aegKu6fKC8/edit?usp=sharing&ouid=113165583169788024831&rtpof=true&sd=true)
+* **File Excel Quản lý Tiến độ:** [Link Google Sheets Quản Lý Dự Án](https://docs.google.com/spreadsheets/d/1kyA4Jfjx29hAYrzJ0eURJlYsCIGVvGeOxhk8tMbwlVU/edit?usp=sharing)
 
 ## 5. Phân công công việc (Thành viên)
 * **TV1:** Project Management, QA, GitHub Administration & Release Manager
@@ -25,7 +25,6 @@
 * **TV3:** GUI File Transfer Manager (Drag & Drop UI, Progress Bar)
 * **TV4:** P2P Core & Network Protocols (Socket TCP/UDP, Peer Discovery)
 * **TV5:** File Transfer Logic (Chunking, Multi-thread File Transfer, Queue)
-* **TV6:** Encryption & Peer Security (AES-256, Public/Private Key Exchange)
 
 ## 6. Trạng thái
 Đang trong quá trình phát triển và hoàn thiện theo kế hoạch của nhóm.
