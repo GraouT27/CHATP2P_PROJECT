@@ -18,6 +18,7 @@
 
 ## 4. Quản lý dự án 
 * **File Excel Quản lý Tiến độ:** [Link Google Sheets Quản Lý Dự Án](https://docs.google.com/spreadsheets/d/1kyA4Jfjx29hAYrzJ0eURJlYsCIGVvGeOxhk8tMbwlVU/edit?usp=sharing)
+* **File Excel Test Cases Template  :** [Link Google Sheets Test Cases Template](https://docs.google.com/spreadsheets/d/1pdK9T2iRrbGYAZR1nQFxwemfeq5KMFsZJ6Ab2rEcbko/edit?usp=sharing)
 
 ## 5. Phân công công việc (Thành viên)
 * **TV1:** Project Management, QA, GitHub Administration & Release Manager
