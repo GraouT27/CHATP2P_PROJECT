@@ -49,35 +49,66 @@ Tài liệu này định nghĩa chi tiết các yêu cầu kiến trúc, chức 
 Thư mục mã nguồn được phân chia rõ ràng theo mô hình Layered Architecture:
 
 ```đề xuất 
-CHATP2P/
-├── README.md                    # Ghi rõ: MAX_CONCURRENT, quy tắc trùng tên
-├── requirements.txt             # tkinterdnd2, pytest
-├── config.py                    # HOST, PORT, MAX_CONCURRENT, CHUNK_SIZE, UPLOAD_DIR
+UDM_09_ChatP2P_Repo/                        # Thư mục gốc trên GitHub của nhóm
 │
-├── server/
-│   ├── main.py                  # Khởi động server asyncio
-│   ├── handler.py               # Nhận file_meta + chunk, ghi đĩa, trả ACK
-│   ├── storage.py               # resolve_filename() xử lý trùng tên, ghi file .part rồi rename
-│   └── uploads/                 # Nơi lưu file nhận được
+├── .gitignore                              # Chặn __pycache__/, .venv/, *.part, *.log, .vscode/, .idea/ (Bắt buộc)
+├── README.md                               # Tên & mã đề tài (UDM_09), DS 6 thành viên, kiến trúc P2P, cấu hình, HD chạy & Link Video Demo
 │
-├── client/
-│   ├── main.py                  # Khởi động GUI
-│   ├── core/
-│   │   ├── upload_task.py       # Class UploadTask: path, size, status, sent, speed, error
-│   │   ├── upload_manager.py    # Hàng đợi + Semaphore + chạy các task song song
-│   │   ├── uploader.py          # Kết nối server, gửi meta + chunk, báo tiến trình qua callback
-│   │   └── speed_meter.py       # Tính tốc độ (byte/s) theo cửa sổ trượt
-│   ├── ui/
-│   │   ├── app.py               # Cửa sổ chính, vùng kéo thả
-│   │   ├── file_row.py          # 1 dòng: tên, size, trạng thái, progress bar, tốc độ, nút Hủy
-│   │   └── dnd.py               # Gắn drag & drop
-│   └── utils/
-│       └── format.py            # Định dạng KB/MB, KB/s
+├── DOCX/                                   # Thư mục chứa Báo cáo Word (Theo yêu cầu cấu trúc Repo)
+│   └── Bao_Cao_Do_An_UDM_09_ChatP2P.docx   # Báo cáo: Mục tiêu, kiến trúc, protocol, cấu trúc message, GUI, phân công, kiểm thử, hạn chế
 │
-├── shared/
-│   └── protocol.py              # Đóng gói message (4 byte độ dài + JSON/binary)
+├── PPTX/                                   # Thư mục chứa Slide thuyết trình (Theo yêu cầu cấu trúc Repo)
+│   └── Slide_Bao_Ve_UDM_09_ChatP2P.pptx    # Slide trình bày khi bảo vệ đồ án
 │
-└── tests/
-    ├── test_storage_rename.py   # Test quy tắc trùng tên
-    ├── test_upload_manager.py   # Test giới hạn đồng thời, lỗi cô lập
-    └── test_protocol.py         
+├── Extra/                                  # Thư mục chứa bằng chứng kiểm thử, hình ảnh, log mẫu (Theo yêu cầu cấu trúc Repo)
+│   ├── logs_evidence/                      # Lưu file log bằng chứng khi chạy demo và test ngắt kết nối
+│   ├── stress_test_results/                # Lưu bảng số liệu, ảnh chụp CPU/RAM/Throughput ở 2 mức tải khác nhau
+│   └── gui_screenshots/                    # Ảnh chụp giao diện phục vụ nhúng vào README.md và Báo cáo
+│
+└── Code/                                   # THƯ MỤC MÃ NGUỒN CHÍNH CỦA ỨNG DỤNG PYTHON
+    │
+    ├── requirements.txt                    # Khai báo thư viện: PyQt6, cryptography, psutil, pytest (TV1)
+    ├── config.py                           # Quản lý cấu hình động: HOST, LISTEN_PORT, TIMEOUT, MAX_CONCURRENT, CHUNK_SIZE (TV4)
+    ├── main.py                             # [ĐIỂM CHẠY DUY NHẤT] Khởi tạo Logger, bật P2P Listener ngầm và mở cửa sổ GUI PyQt6 (TV1, TV2, TV4)
+    │
+    ├── p2p_node/                           # PHÂN HỆ LÕI MẠNG P2P & TRUYỀN TẢI ĐA LUỒNG (TV4 & TV5)
+    │   ├── __init__.py
+    │   ├── discovery.py                    # [TV4] UDP Broadcast tự động quét và thông báo sự hiện diện của Peer trong mạng LAN
+    │   ├── listener.py                     # [TV4] QThread mở TCP Socket lắng nghe kết nối đến từ các Peer khác (không dùng Server trung tâm)
+    │   ├── sender.py                       # [TV4, TV5] Thiết lập kết nối TCP tới Peer đích, gửi gói tin chat/chunk file có kiểm soát Timeout
+    │   ├── handler.py                      # [TV4, TV5] Xử lý luồng dữ liệu đến: giải mã, phân loại Text/Emoji/Reply/Forward/Avatar/File và trả ACK
+    │   ├── transfer_task.py                # [TV5] Lớp đối tượng quản lý trạng thái 1 tác vụ truyền file (path, size, status, sent, speed, error)
+    │   ├── transfer_manager.py             # [TV5] Quản lý Hàng đợi (Queue) + Semaphore giới hạn luồng + QThread truyền đa file song song
+    │   ├── storage.py                      # [TV5] Ghi chunk vào file tạm (.part), kiểm tra hoàn tất mới rename, xử lý trùng tên & lưu cache Avatar
+    │   └── speed_meter.py                  # [TV5] Thuật toán cửa sổ trượt tính tốc độ truyền (KB/s, MB/s, message/s) theo thời gian thực
+    │
+    ├── ui/                                 # PHÂN HỆ GIAO DIỆN ĐỒ HỌA DESKTOP PYQT6 (TV2 & TV3)
+    │   ├── __init__.py
+    │   ├── app.py                          # [TV2] Cửa sổ chính (MainWindow), bố cục tổng thể và thanh hiển thị trạng thái kết nối/xử lý
+    │   ├── peer_list_widget.py             # [TV2] Khung danh sách Peer bên trái: hiển thị Avatar (QPixmap), tên, IP:Port và trạng thái Online/Offline
+    │   ├── chat_widgets.py                 # [TV2] Bong bóng chat (kèm Avatar), khung trích dẫn Reply tin nhắn, và bảng chọn Emoji (Emoji Picker)
+    │   ├── dialogs.py                      # [TV3] Hộp thoại (QDialog) chọn Peer để Forward tin nhắn & Hộp thoại đổi IP/Port/Chọn ảnh Avatar
+    │   ├── file_row.py                     # [TV3] Widget hiển thị 1 dòng truyền file: Tên, dung lượng, thanh QProgressBar, tốc độ, nút Hủy
+    │   ├── dnd.py                          # [TV3] Xử lý sự kiện Kéo & Thả file (dragEnterEvent, dropEvent) trực tiếp vào khu vực trò chuyện
+    │   └── styles.qss                      # [TV2, TV3] Bảng định dạng giao diện Qt Style Sheets (bo góc khung chat, màu sắc chủ đạo)
+    │
+    ├── security/                           # PHÂN HỆ BẢO MẬT, MÃ HÓA & GHI LOG AN TOÀN (TV6)
+    │   ├── __init__.py
+    │   ├── crypto_manager.py               # [TV6] Sinh cặp khóa RSA động trên RAM (không hard-code), trao đổi khóa và mã hóa/giải mã AES-256
+    │   └── logger.py                       # [TV6] Ghi log sự kiện (thời gian, kết nối, ngắt kết nối, lỗi) ra file và lọc bỏ khóa bí mật khỏi log
+    │
+    ├── shared/                             # PHÂN HỆ GIAO THỨC & TIỆN ÍCH DÙNG CHUNG (TV3, TV4, TV6)
+    │   ├── __init__.py
+    │   ├── protocol.py                     # [TV4] Đóng gói & bóc tách khung bản tin: [4 bytes Length] + [JSON Header/UUID/Reply/Forward] + [Payload]
+    │   ├── validator.py                    # [TV6] Kiểm tra tính hợp lệ của JSON Header nhận được & đối chiếu mã băm toàn vẹn SHA-256
+    │   └── format.py                       # [TV3] Hàm tiện ích định dạng hiển thị dung lượng (KB, MB, GB), tốc độ (MB/s) và nhãn thời gian
+    │
+    ├── received_files/                     # Thư mục mặc định lưu các File hoàn chỉnh và cache Avatar nhận được từ Peer khác
+    │   └── .gitkeep                        # Giữ cấu trúc thư mục trống trên Git (bỏ qua các file tải về bên trong)
+    │
+    └── tests/                              # PHÂN HỆ KIỂM THỬ CHỨC NĂNG, BẮT LỖI & ĐO HIỆU NĂNG 2 MỨC TẢI (TV1)
+        ├── __init__.py
+        ├── test_protocol_security.py       # [TV1] Kiểm thử đóng gói bản tin, mã hóa AES-256 và từ chối dữ liệu sai định dạng (Malformed data)
+        ├── test_storage_rename.py          # [TV1] Kiểm thử quy tắc đổi tên khi trùng file và tự động xóa file .part khi ngắt kết nối đột ngột
+        ├── test_transfer_manager.py        # [TV1] Kiểm thử giới hạn luồng đồng thời (MAX_CONCURRENT) và cô lập lỗi khi 1 Peer bị sập
+        └── benchmark_stress.py             # [TV1] Script tự động chạy Stress Test & Performance Test ở 2 mức tải (đo Latency, Throughput, CPU, RAM)
