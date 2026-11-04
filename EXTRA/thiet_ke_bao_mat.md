@@ -27,6 +27,8 @@ Dùng GCM thay vì CBC vì GCM vừa mã hóa vừa xác thực, không cần t�
 
 ## 3. Sơ đồ bắt tay và trao đổi khóa
 
+Bắt tay dùng đúng loại thông điệp `KEY_EXCHANGE` trong giao thức chung của nhóm (`message_protocol.md`, mục 3.6). Mỗi thông điệp có `header` và `payload` như mọi tin khác, `sender_id` và `receiver_id` là ID của peer.
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -34,36 +36,47 @@ sequenceDiagram
     participant B as Peer B (bên nhận)
     Note over A,B: Mỗi peer tự sinh cặp khóa RSA-2048 khi khởi động
     A->>B: TCP connect
-    A->>B: HELLO - peer_id, name, version, rsa_pub_A
-    B->>A: HELLO_ACK - peer_id, name, rsa_pub_B
-    Note over A,B: Cả hai tính fingerprint của khóa công khai đối phương và hiển thị trên GUI
-    Note over A: Sinh khóa gốc K gồm 32 byte ngẫu nhiên
-    A->>B: KEY_EXCHANGE - RSA-OAEP của K bằng rsa_pub_B
-    Note over B: Giải mã bằng rsa_priv_B để lấy K
-    Note over A,B: Cả hai dùng HKDF-SHA256 từ K để ra k_a2b và k_b2a
-    B->>A: KEY_CONFIRM - AES-GCM của chuỗi OK bằng k_b2a
+    A->>B: KEY_EXCHANGE, action PUBLIC_KEY, khóa công khai của A
+    B->>A: KEY_EXCHANGE, action PUBLIC_KEY, khóa công khai của B
+    Note over A,B: Cả hai tính fingerprint của khóa đối phương và hiển thị trên GUI
+    Note over A: Sinh khóa phiên K gồm 32 byte ngẫu nhiên
+    A->>B: KEY_EXCHANGE, action SESSION_KEY, K mã hóa bằng RSA-OAEP-SHA256
+    Note over B: Giải mã bằng khóa riêng của B để lấy K
+    Note over A,B: HKDF-SHA256 từ K ra k_a2b và k_b2a, từ đây mọi khung đều mã hóa
+    B->>A: KEY_EXCHANGE, action KEY_CONFIRM, khung mã hóa bằng k_b2a
     Note over A: Giải mã thành công nghĩa là B nắm đúng K
-    A->>B: Dữ liệu mã hóa - MSG, AVATAR, FILE_CHUNK
-    B->>A: Dữ liệu mã hóa - MSG, ACK
+    A->>B: Thông điệp mã hóa TEXT, REPLY, FORWARD, FILE
+    B->>A: Thông điệp mã hóa
 ```
+
+**Ánh xạ vào payload của giao thức nhóm:**
+
+| Bước | `action` | `algorithm` | Trường chính |
+|---|---|---|---|
+| 2, 3 | `PUBLIC_KEY` | `RSA-2048` | `key_id` = `key-` + 8 ký tự đầu fingerprint, `public_key` = chuỗi PEM |
+| 6 | `SESSION_KEY` | `RSA-OAEP-SHA256` | `key_id` của khóa đã dùng, `encrypted_session_key` = base64 |
+| 9 | `KEY_CONFIRM` | `AES-256-GCM` | Không cần trường khóa. Khung này đã được mã hóa |
 
 Quy tắc:
 - `K` chỉ tồn tại trong RAM, hủy khi đóng kết nối. Mỗi kết nối một `K` mới.
 - Nếu `KEY_CONFIRM` sai hoặc quá thời gian (đề xuất 5 giây) thì đóng kết nối và ghi log `HANDSHAKE_FAIL`.
-- `HKDF`: salt = SHA-256(rsa_pub_A || rsa_pub_B), info = `"a2b"` hoặc `"b2a"`.
+- HKDF: salt = SHA-256 của (khóa công khai bên gọi nối khóa công khai bên nhận), info = `p2p-chat a2b` hoặc `p2p-chat b2a`. Hàm `handshake_salt` trong code làm việc này.
+- Khi nhận `PUBLIC_KEY`, GUI hiện fingerprint để người dùng đối chiếu, đúng quy tắc "xác thực khóa công khai" trong giao thức nhóm.
 
-## 4. Định dạng gói tin sau khi bắt tay
+## 4. Khung dữ liệu (framing)
 
-Mỗi gói gửi qua TCP có dạng:
+Giữ nguyên quy tắc framing của nhóm (`message_protocol.md`, mục 5): **4 byte độ dài (số nguyên không dấu, big-endian) rồi đến dữ liệu**. Phần tách gói của TV Socket không phải đổi. Chỉ phần dữ liệu thay đổi theo trạng thái kết nối:
 
-```
-| 4 byte: độ dài | 8 byte: seq | 12 byte: nonce | ciphertext | 16 byte: tag |
-```
+| Giai đoạn | Dữ liệu sau 4 byte độ dài |
+|---|---|
+| Trước `SESSION_KEY` (bắt tay) | JSON UTF-8 thuần, đúng như giao thức nhóm |
+| Sau `SESSION_KEY` | Khối mã hóa: `seq (8)` + `nonce (12)` + `ciphertext` + `tag (16)` |
 
-- Độ dài tính từ `seq` đến hết `tag`, dùng big-endian (giúp TV4 tách gói, tránh dính gói trên TCP).
-- AAD của GCM = `seq` (8 byte). Bên nhận kiểm tra `seq` phải lớn hơn seq trước đó, nếu không thì loại gói và ghi `REPLAY_DETECTED`.
-- Plaintext là JSON UTF-8, ví dụ `{"type":"msg","id":"abc123","text":"Hello","reply_to":null}`.
-- File lớn: mỗi chunk mã hóa riêng, dùng chung bộ đếm seq của kết nối (TV5 chỉ gọi `encrypt`, không tự quản nonce).
+- Plaintext của khối mã hóa chính là JSON UTF-8 của thông điệp (cả `header` và `payload`), nên `message_type`, `message_id`... không đổi.
+- Độ dài trong 4 byte đầu tính cả phần thêm vào (36 byte). Hằng `OVERHEAD = 36` có trong code.
+- AAD của GCM là `seq`. Bên nhận loại gói có `seq` không lớn hơn `seq` trước đó và ghi `REPLAY_DETECTED`.
+- Đề xuất giới hạn khung 1 MiB (`MAX_FRAME_SIZE`) để tránh cấp phát bộ nhớ quá lớn, đúng yêu cầu mục 5 của giao thức nhóm.
+- Mỗi chunk file là một khối mã hóa riêng. TV truyền file chỉ gọi `encrypt`, không tự quản lý nonce.
 
 ## 5. Bộ ghi Log an toàn
 
@@ -110,31 +123,37 @@ flowchart LR
 
 ## 7. Giao diện lập trình (API) cho các module khác
 
-Đặt tại `CODE/core/security/` (đề xuất):
+Mã nguồn: `CODE/security/crypto.py` (import: `from security.crypto import ...`).
 
 ```python
-class KeyPair:
-    @staticmethod
-    def generate() -> "KeyPair": ...
-    def public_pem(self) -> bytes: ...
-    def fingerprint(self) -> str: ...
+# Bắt tay
+kp = KeyPair.generate()              # RSA-2048 sinh động, khóa riêng chỉ ở RAM
+kp.public_pem()                      # str, đặt vào payload.public_key
+kp.fingerprint()                     # "AB12 CD34 ..." hiển thị trên GUI
+kp.short_id()                        # 8 ký tự, dùng cho key_id và log
+fingerprint_of_pem(pem)              # fingerprint của khóa nhận được
 
-class SessionCrypto:
-    def encrypt(self, plaintext: bytes) -> bytes: ...   # trả về seq|nonce|ct|tag
-    def decrypt(self, blob: bytes) -> bytes: ...        # ném DecryptError nếu sai
+k = new_session_key()                # bên gọi: 32 byte ngẫu nhiên
+enc = encrypt_session_key(peer_pem, k)       # str base64, đặt vào payload.encrypted_session_key
+k = kp.decrypt_session_key(enc)              # bên nhận: lấy lại K
+salt = handshake_salt(pem_bên_gọi, pem_bên_nhận)
 
-def handshake_initiator(sock, keypair, name) -> tuple[SessionCrypto, str]: ...
-def handshake_responder(sock, keypair, name) -> tuple[SessionCrypto, str]: ...
+# Sau bắt tay
+sc = SessionCrypto(k, is_initiator=True, salt=salt)   # bên nhận dùng is_initiator=False
+blob = sc.encrypt(json_bytes)        # gửi: 4 byte độ dài + blob
+data = sc.decrypt(blob)              # nhận: sai khóa, bị sửa -> DecryptError, gói cũ -> ReplayError
 ```
 
-Log: `CODE/core/logging/secure_logger.py` cung cấp `get_logger(name)` và `log_event(event, level, **fields)`.
+Lỗi: `CryptoError` (gốc), `DecryptError`, `ReplayError`. Khi bắt được lỗi thì bỏ gói, ghi log sự kiện, không để chương trình thoát.
 
 | Ai dùng | Gọi gì |
 |---|---|
-| TV phụ trách socket (TV4) | `handshake_*`, rồi `encrypt` trước khi `sendall`, `decrypt` sau khi nhận |
+| TV Socket | `KeyPair`, 3 bước bắt tay, rồi `encrypt` trước `sendall` và `decrypt` sau khi nhận đủ khung |
 | TV truyền file | `encrypt` từng chunk |
 | TV giao diện | `fingerprint()` để hiển thị |
-| Mọi module | `log_event(...)` thay cho `print` |
+| Mọi module | `log_event(...)` thay cho `print` (làm ở chặng sau) |
+
+Lưu ý khi nhiều luồng cùng gửi: đặt `encrypt` và `sendall` trong **cùng một lock**, nếu không các gói có thể đến sai thứ tự và bị coi là phát lại.
 
 ## 8. Mối đe dọa và biện pháp
 
@@ -165,4 +184,5 @@ Log: `CODE/core/logging/secure_logger.py` cung cấp `get_logger(name)` và `log
 - [x] Tạo `requirements.txt` (PyQt6, cryptography, psutil, pytest)
 - [x] Thiết kế sơ đồ trao đổi khóa RSA + AES-256 (mục 3, 4)
 - [x] Thiết kế cấu trúc bộ ghi Log an toàn (mục 5)
-- [ ] Nhóm xác nhận các lựa chọn (GCM, khóa sinh động, định dạng gói)
+- [x] Đối chiếu với `message_protocol.md` (framing, KEY_EXCHANGE)
+- [ ] Nhóm xác nhận các lựa chọn (GCM, khóa sinh động, thêm action KEY_CONFIRM)
