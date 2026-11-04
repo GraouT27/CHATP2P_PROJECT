@@ -1,16 +1,23 @@
 import socket
+import time
 
+from config.config_loader import load_config
 from shared.protocol import(
     create_message,
     encode_message,
     recv_message
 )
 
-HOST = "127.0.0.1"
-PORT = 5000
+# HOST = "127.0.0.1"
+# PORT = 5000
 
 
 def main():
+    config = load_config()
+    HOST = config["listen_host"]
+    PORT = config["listen_port"]
+
+
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     
@@ -31,6 +38,12 @@ def main():
                 except ConnectionError:
                     print("Client đã ngắt kết nối!") 
                     break
+
+                except OSError as e:
+                    print("Lỗi mạng: ", e)
+                    break
+
+
                 text = message["payload"]["text"]
 
                 if text == "exit":
@@ -46,6 +59,7 @@ def main():
                     payload= {"text": f"Server nhan duoc: {text}"}
                 )
 
+                time.sleep(12)
                 conn.sendall(encode_message(respone))
     finally:
         server.close()

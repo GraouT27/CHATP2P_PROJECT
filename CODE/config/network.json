@@ -1,0 +1,7 @@
+{
+    "listen_host": "127.0.0.1",
+    "listen_port": 6000,
+    "peer_host": "127.0.0.1",
+    "peer_port": 6000,
+    "timeout": 10
+}
