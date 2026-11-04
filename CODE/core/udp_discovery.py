@@ -53,7 +53,7 @@ def listen_discovery():
                     data.decode("utf-8")
                 )
 
-                if message.get("type") == "DISCOVEY":
+                if message.get("type") == "DISCOVERY":
                     peer_id = message.get("peer_id")
                     tcp_port = message.get("tcp_port")
                     peer_ip = addr[0]
