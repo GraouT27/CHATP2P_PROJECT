@@ -1,5 +1,4 @@
 import socket
-import time
 
 from config.config_loader import load_config
 from shared.protocol import(
@@ -59,7 +58,7 @@ def main():
                     payload= {"text": f"Server nhan duoc: {text}"}
                 )
 
-                time.sleep(12)
+                
                 conn.sendall(encode_message(respone))
     finally:
         server.close()

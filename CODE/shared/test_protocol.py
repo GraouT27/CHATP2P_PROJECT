@@ -1,5 +1,5 @@
 import struct
-from protocol import create_message, encode_message, decode_message 
+from shared.protocol import create_message, encode_message, decode_message 
 
 
 test_messages = [{
@@ -7,8 +7,8 @@ test_messages = [{
     "payload": {"text": "Xin chào nhaa~"}
 },
 {
-    "type":"EMOJI",
-    "payload": {"emoji":"😊"}
+    "type": "EMOJI",
+    "payload": {"emoji": "😊"}
 },
 {
     "type": "REPLY",
@@ -18,12 +18,12 @@ test_messages = [{
     }
 }]
 
-for item in test_messages: 
+for item in test_messages:
     message = create_message (
         sender_id= "peer-A",
         receiver_id= "peer-B",
         message_type= item["type"],
-        payload = item["payload"]
+        payload=item["payload"]
     )
 
     frame = encode_message(message)
