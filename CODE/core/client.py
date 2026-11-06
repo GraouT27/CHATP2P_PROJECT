@@ -12,12 +12,20 @@ from shared.protocol import (
 
 
 
-def main():
+def main(peer_manager, target_peer_id):
 
     config = load_config()
-    HOST = config["peer_host"]
-    PORT = config["peer_port"]
+    MY_PEER_ID = config["peer_id"]
+
+    peer = peer_manager.get_peer(target_peer_id)
+
+    if peer is None:
+        print(f"Không tìm thấy peer với ID: {target_peer_id}")
+        return
     
+
+    HOST = peer["ip"]
+    PORT = peer["tcp_port"]
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
         client.settimeout(10)
@@ -45,8 +53,8 @@ def main():
                 break
 
             message = create_message(
-                sender_id= "peer-A",
-                receiver_id= "peer-B",
+                sender_id= MY_PEER_ID,
+                receiver_id= target_peer_id,
                 message_type= "TEXT",
                 payload= {"text": text}
             )
@@ -69,10 +77,30 @@ def main():
                 print("Lỗi mạng:", e)
                 break
 
-                
-            print("Peer B: ", response["payload"]["text"])
+            except ValueError as e:
+                print("Lỗi giải mã phản hồi:", e)
+                break
+
+            if not isinstance(response, dict):
+                print("Response từ server không hợp lệ!")
+                continue
+
+            payload = response.get("payload", {})
+
+            if not isinstance(payload, dict):
+                print("Payload từ server không hợp lệ!")
+                continue
+
+            text = payload.get("text")
+
+            if not isinstance(text, str):
+                print("Response từ server không phải là chuỗi!")
+                continue
+
+           
+            print(f"Peer {target_peer_id}: {text}")
 
 
 
 if __name__ == "__main__":
-    main()
+    print("Hãy chạy ứng dụng từ main.py")

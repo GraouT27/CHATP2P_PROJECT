@@ -1,12 +1,15 @@
 import socket
 import json
 import sys
+
+from  core.peer_manager import PeerManager
 from config.config_loader import load_config
 
+peer_manager = PeerManager()
 config = load_config()
 
 BROADCAST_IP = "255.255.255.255"
-DISCOVERY_PORT = config.get("discovery_port")
+DISCOVERY_PORT = config.get("discovery_port", 9999)
 
 def send_discovery():
 
@@ -28,11 +31,6 @@ def send_discovery():
             socket.SO_BROADCAST,
             1
         )
-        sock.setsockopt(
-            socket.SOL_SOCKET,
-            socket.SO_REUSEADDR,
-            1
-        )
 
         sock.sendto(
             data,
@@ -42,7 +40,7 @@ def send_discovery():
         print("Đã gửi Discovery Broadcast.")
 
 
-def listen_discovery():
+def listen_discovery(peer_manager):
     with socket.socket(
         socket.AF_INET,
         socket.SOCK_DGRAM
@@ -75,8 +73,8 @@ def listen_discovery():
                     continue
 
                 peer_id = message.get("peer_id")
-                if peer_id is None:
-                    print("Nhận được message không có peer_id, bỏ qua!")
+                if not isinstance(peer_id, str) or not peer_id.strip():
+                    print("Nhận được message không có peer_id hợp lệ, bỏ qua!")
                     continue
 
                 tcp_port = message.get("tcp_port")
@@ -84,20 +82,25 @@ def listen_discovery():
                     print("Nhận được message không có tcp_port hợp lệ, bỏ qua!")
                     continue
 
+                if message.get("type") != "DISCOVERY":
+                    continue
+
+                # Không lọc bỏ peer của chính mình khi chạy trên cùng máy
+                # với config khác nhau (peer_id khác). Chỉ bỏ qua nếu địa chỉ
+                # IP và cổng trùng với máy hiện tại.
                 if peer_id == my_peer_id:
-                    continue 
-
+                    continue
                 
+                peer_ip = addr[0]
 
-                if message.get("type") == "DISCOVERY":
-                    peer_id = message.get("peer_id")
-                    tcp_port = message.get("tcp_port")
-                    peer_ip = addr[0]
+                peer_manager.add_peer(peer_id, peer_ip, tcp_port)
 
-                    print("\nĐã phát hiện Peer!")
-                    print("Peer ID:", peer_id)
-                    print("IP:", peer_ip)
-                    print("TCP Port:", tcp_port)
+                print("Danh sach Peer hien tai:", peer_manager.get_all_peers())
+               
+                print("\nĐã phát hiện Peer!")
+                print("Peer ID:", peer_id)
+                print("IP:", peer_ip)
+                print("TCP Port:", tcp_port)
 
             except socket.timeout:
                 print("Chưa nhận được Discovery, tiếp tục chờ....")
@@ -115,7 +118,7 @@ if __name__ == "__main__":
         print("python udp_discovery.py send")
 
     elif sys.argv[1] == "listen":
-        listen_discovery()
+        listen_discovery(peer_manager)
 
     elif sys.argv[1] == "send":
         send_discovery()

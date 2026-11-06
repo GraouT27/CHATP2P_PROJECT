@@ -15,6 +15,7 @@ def main():
     config = load_config()
     HOST = config["listen_host"]
     PORT = config["listen_port"]
+    MY_PEER_ID = config["peer_id"]
 
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -22,44 +23,66 @@ def main():
     
     try:
         server.bind((HOST, PORT))
-        server.listen(1)
+        server.listen(5)
 
         print(f"Server dang nghe tai:{HOST}:{PORT}")
 
-        conn, addr = server.accept()
-        print("Server da ket noi voi:", addr)
+        
+        while True:
+            conn, addr = server.accept()
+            print("Server da ket noi voi:", addr)
 
-    
-        with conn: 
-            while True:
-                try:
-                    message = recv_message(conn)
-                except ConnectionError:
-                    print("Client đã ngắt kết nối!") 
-                    break
+        
+            with conn: 
+                while True:
+                    try:
+                        message = recv_message(conn)
+                    except ConnectionError:
+                        print("Client đã ngắt kết nối!") 
+                        break
 
-                except OSError as e:
-                    print("Lỗi mạng: ", e)
-                    break
+                    except OSError as e:
+                        print("Lỗi mạng: ", e)
+                        break
 
 
-                text = message["payload"]["text"]
 
-                if text == "exit":
-                    print("Client yêu cầu thoát!")
-                    break
+                    if not isinstance(message, dict):
+                        print("Message không hợp lệ, bỏ qua!")
+                        continue
 
-                print("Server nhận được:", text)
+                    payload = message.get("payload", {})
+                    if not isinstance(payload, dict):
+                        print("Payload không hợp lệ, bỏ qua!")
+                        continue
+                    
+                    text = payload.get("text")
+                    if not isinstance(text, str):
+                        print("Message text không hợp lệ, bỏ qua!")
+                        continue
 
-                respone = create_message(
-                    sender_id= "peer-B",
-                    receiver_id= message["header"]["receiver_id"],
-                    message_type= "TEXT",
-                    payload= {"text": f"Server nhan duoc: {text}"}
-                )
+                    if text is None:
+                        print("Message không có payload text, bỏ qua!")
+                        continue
 
-                
-                conn.sendall(encode_message(respone))
+                    if text == "exit":
+                        print("Client yêu cầu thoát!")
+                        break
+
+                    print("Server nhận được:", text)
+
+                    response = create_message(
+                        sender_id=MY_PEER_ID,
+                        receiver_id=message.get("header", {}).get("sender_id", "unknown"),
+                        message_type="TEXT",
+                        payload={"text": f"Server nhan duoc: {text}"}
+                    )
+
+                    try:
+                        conn.sendall(encode_message(response))
+                    except (ConnectionError, OSError) as e:
+                        print("Lỗi khi gửi phản hồi:", e)
+                        break
     finally:
         server.close()
         print("Server đã đóng.")

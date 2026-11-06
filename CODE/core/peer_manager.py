@@ -28,7 +28,7 @@ class PeerManager:
                 self._peers[peer_id] = {
                     "ip": ip,
                     "tcp_port": tcp_port,
-                    "connected_at": now,
+                    "discovered_at": now,
                     "last_seen": now,
                 }
 
@@ -40,7 +40,8 @@ class PeerManager:
     def get_peer(self, peer_id):
         """Lấy thông tin của một peer theo ID. Trả về None nếu không tìm thấy."""
         with self._lock:
-            return self._peers.get(peer_id)
+            peer = self._peers.get(peer_id)
+            return peer.copy() if peer else None
 
     def get_all_peers(self):
         """Trả về bản sao của danh sách tất cả các peer (không bao gồm socket)."""
