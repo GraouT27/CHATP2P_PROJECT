@@ -1,4 +1,4 @@
-### CHƯƠNG 1
+# CHƯƠNG 1: MỞ ĐẦU
 ## 1.1. Lý do chọn đề tài
 Một trong những mô h mô hình mạng được sử dụng để xây dựng trao đổi dữ liệu là mô hình Peer-to-Peer (P2P). Đây là mô hình cho phép các thiết bị tham gia mạng có thể trực tiếp giao tiếp với nhau và trao đổi dữ liệu với nhau, khác so với mô hình Client-Server truyền thống, trong đó các thiết bị thường phải giao tiếp thông qua một máy chủ trung tâm. 
 Nhóm đã vận dụng các kiến thức liên quan đến lập trình mạng, giao thức TCP/IP, lập trình socket, truyền thông UDP và xử lý dữ liệu JSON, ngoài ra còn có lập trình đa luồng và mã hóa dữ liệu nhằm nâng cao khả năng xử lý và bảo mật thông tin để nghiên cứu và xây dựng đề tài P2P Chat & File Transfer Application - ứng dụng nhắn tin và truyền tải tệp tin theo mô hình P2P.
