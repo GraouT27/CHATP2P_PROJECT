@@ -80,6 +80,8 @@ Giữ nguyên quy tắc framing của nhóm (`message_protocol.md`, mục 5): **
 
 ## 5. Bộ ghi Log an toàn
 
+Mã nguồn: `CODE/logger.py` (`setup_logging`, `log_event`, `Event`, `mask_ip`). Bắt tay: `CODE/security/handshake.py`.
+
 ```mermaid
 flowchart LR
     M["Module gui, core, transfers"] -->|"log_event"| F["SecureLogger"]
@@ -143,6 +145,21 @@ sc = SessionCrypto(k, is_initiator=True, salt=salt)   # bên nhận dùng is_ini
 blob = sc.encrypt(json_bytes)        # gửi: 4 byte độ dài + blob
 data = sc.decrypt(blob)              # nhận: sai khóa, bị sửa -> DecryptError, gói cũ -> ReplayError
 ```
+
+Bắt tay hoàn chỉnh qua socket (hàm chặn, gọi trong QThread):
+
+```python
+from security.handshake import handshake_initiator, handshake_responder, send_secure, recv_secure, make_message
+
+kp = KeyPair.generate()
+res = handshake_initiator(sock, kp, my_id, peer_id, confirm_peer=None)   # bên gọi
+res = handshake_responder(sock, kp, my_id, confirm_peer=None)            # bên nhận
+# res.session, res.peer_id, res.peer_fingerprint
+send_secure(sock, res.session, make_message("TEXT", my_id, peer_id, {"text": "Xin chào"}))
+msg = recv_secure(sock, res.session)        # dict có header và payload
+```
+
+`confirm_peer(fingerprint) -> bool` chỉ dùng cho kiểm tra tự động và phải trả lời nhanh (bên kia đang chờ, timeout 5 giây). Để người dùng đối chiếu vân tay, hiển thị `res.peer_fingerprint` **sau khi** bắt tay xong rồi đóng kết nối nếu họ từ chối. Bắt tay thất bại ném `HandshakeError`, khi đó nơi gọi tự đóng socket. Đối phương đóng kết nối thì `recv_secure` ném `ConnectionError`, nên `except ConnectionError` trong code Socket vẫn chạy.
 
 Lỗi: `CryptoError` (gốc), `DecryptError`, `ReplayError`. Khi bắt được lỗi thì bỏ gói, ghi log sự kiện, không để chương trình thoát.
 
