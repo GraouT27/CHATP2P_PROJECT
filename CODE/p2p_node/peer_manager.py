@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 
 class PeerManager:
-    """Quản lý danh sách các peer đã kết nối (thread-safe)."""
+    """Quản lý danh sách peer được phát hiện (thread-safe)."""
 
     def __init__(self):
         self._peers = {}

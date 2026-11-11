@@ -2,7 +2,7 @@ import socket
 import json
 import sys
 
-from  core.peer_manager import PeerManager
+from p2p_node.peer_manager import PeerManager
 from config.config_loader import load_config
 
 peer_manager = PeerManager()
@@ -114,8 +114,8 @@ if __name__ == "__main__":
 
     if len(sys.argv) < 2:
         print("Cách dùng:")
-        print("python udp_discovery.py listen")
-        print("python udp_discovery.py send")
+        print("python -m p2p_node.discovery listen")
+        print("python -m p2p_node.discovery send")
 
     elif sys.argv[1] == "listen":
         listen_discovery(peer_manager)

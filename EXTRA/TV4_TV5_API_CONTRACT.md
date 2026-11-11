@@ -34,7 +34,7 @@
 
 ## 3. API public dự kiến
 
-Các hàm đã có được giữ tên để giảm thay đổi. Chữ **mới** chỉ API dự kiến, chưa được code.
+Các hàm TV4 trong `shared/protocol.py` và `PeerManager` đã có. `validate_message()` đã được TV4 bổ sung; các hàm `MessageHandler` vẫn là API dự kiến cần TV5 xác nhận.
 
 ```python
 # TV4: CODE/shared/protocol.py
@@ -42,7 +42,7 @@ create_message(sender_id: str, receiver_id: str,
                message_type: str, payload: dict) -> dict        # đã có
 encode_message(message: dict) -> bytes                          # đã có; gồm cả 4 byte độ dài
 recv_message(sock) -> dict                                      # đã có; đọc đủ một message
-validate_message(message: dict) -> None                         # mới; ValueError nếu sai schema
+validate_message(message: dict) -> None                         # đã có; ValueError nếu sai schema
 
 # TV4: CODE/p2p_node/peer_manager.py
 PeerManager.add_peer(peer_id: str, ip: str, tcp_port: int) -> None

@@ -1,9 +1,9 @@
 import threading
 import time
 
-from core.peer_manager import PeerManager
+from p2p_node.peer_manager import PeerManager
 from core.server import main as server_main
-from core.udp_discovery import listen_discovery, send_discovery
+from p2p_node.discovery import listen_discovery, send_discovery
 from core.client import main as client_main
 
 def broadcast_loop():
