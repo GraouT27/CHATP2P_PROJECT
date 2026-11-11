@@ -55,7 +55,9 @@ class PeerManager:
         """Cập nhật thời gian peer hoạt động gần nhất."""
         with self._lock:
             if peer_id in self._peers:
-                self._peers[peer_id]["last_seen"] = datetime.now().isoformat()
+                self._peers[peer_id]["last_seen"] = (
+                    datetime.now(timezone.utc).isoformat()
+                )
 
     def peer_count(self):
         """Trả về số lượng peer đang quản lý."""

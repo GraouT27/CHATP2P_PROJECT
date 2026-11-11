@@ -41,14 +41,29 @@ def main():
                         print("Client đã ngắt kết nối!") 
                         break
 
+                    except ValueError as e:
+                        print("Message không hợp lệ:", e)
+                        break
+
                     except OSError as e:
                         print("Lỗi mạng: ", e)
                         break
 
 
-
                     if not isinstance(message, dict):
                         print("Message không hợp lệ, bỏ qua!")
+                        continue
+                    
+                    header = message.get("header")
+
+                    if not isinstance(header, dict):
+                        print("Header không hợp lệ, bỏ qua!")
+                        continue
+
+                    sender_id = header.get("sender_id")
+
+                    if not isinstance(sender_id, str) or not sender_id.strip():
+                        print("Sender ID không hợp lệ, bỏ qua!")
                         continue
 
                     payload = message.get("payload", {})
@@ -61,9 +76,6 @@ def main():
                         print("Message text không hợp lệ, bỏ qua!")
                         continue
 
-                    if text is None:
-                        print("Message không có payload text, bỏ qua!")
-                        continue
 
                     if text == "exit":
                         print("Client yêu cầu thoát!")
@@ -73,7 +85,7 @@ def main():
 
                     response = create_message(
                         sender_id=MY_PEER_ID,
-                        receiver_id=message.get("header", {}).get("sender_id", "unknown"),
+                        receiver_id= sender_id,
                         message_type="TEXT",
                         payload={"text": f"Server nhan duoc: {text}"}
                     )
