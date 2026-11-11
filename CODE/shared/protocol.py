@@ -42,6 +42,14 @@ def validate_message(message):
     ):
         raise ValueError(f"Payload thiếu hoặc sai {required_field}")
 
+    message_type = header["message_type"]
+    if message_type == "FILE":
+        raise ValueError("Loại file phải có dạng FILE_<ACTION>")
+    if message_type.startswith("FILE_"):
+        action = message_type.removeprefix("FILE_")
+        if not action or payload.get("action") != action:
+            raise ValueError("payload.action phải khớp với FILE_<ACTION>")
+
     return None
 
 def create_message(sender_id, receiver_id, message_type, payload):

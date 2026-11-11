@@ -1,6 +1,6 @@
 # Đề xuất hợp đồng API giữa TV4 và TV5
 
-**Trạng thái:** Bản đề xuất để TV4 và TV5 cùng duyệt; chưa phải API đã triển khai.
+**Trạng thái:** TV4 và TV5 đã chốt cách đặt tên file `FILE_<ACTION>` kèm `payload.action`. Các phần ACK/retry, avatar và bảo mật vẫn cần thống nhất.
 
 **Phạm vi:** Kết nối TCP, message ứng dụng, truyền file/avatar và thông báo tiến trình.
 
@@ -34,7 +34,7 @@
 
 ## 3. API public dự kiến
 
-Các hàm TV4 trong `shared/protocol.py` và `PeerManager` đã có. `validate_message()` đã được TV4 bổ sung; các hàm `MessageHandler` vẫn là API dự kiến cần TV5 xác nhận.
+Các hàm TV4 trong `shared/protocol.py`, `PeerManager` và `MessageHandler` đã có. API callback của `MessageHandler` là bản triển khai TV4 để TV5 tích hợp và phản hồi.
 
 ```python
 # TV4: CODE/shared/protocol.py
@@ -49,7 +49,7 @@ PeerManager.add_peer(peer_id: str, ip: str, tcp_port: int) -> None
 PeerManager.get_peer(peer_id: str) -> dict | None
 # dict tối thiểu: {"ip": str, "tcp_port": int}
 
-# TV4: CODE/p2p_node/handler.py (mới)
+# TV4: CODE/p2p_node/handler.py
 MessageHandler.register(message_type: str, callback) -> None
 MessageHandler.handle_message(message: dict, send_reply) -> None
 # callback(message: dict, send_reply: Callable[[dict], None]) -> None
@@ -68,19 +68,19 @@ TCPListener.close() -> None                                     # hiện có
 
 Ví dụ luồng gửi: `peer = manager.get_peer(peer_id)` → `sender.connect(peer["ip"], peer["tcp_port"])` → `sender.send(encode_message(message))`. Luồng nhận: `listener.accept_peer()` → `recv_message(conn)` → `handler.handle_message(message, send_reply)`. **Chỉ một nơi được gọi `recv_message(conn)` trên cùng socket.** Điểm chạy chung đăng ký callback file của TV5 vào handler TV4; hai module không import vòng nhau.
 
-TV4 sở hữu callback `TEXT`/`EMOJI` và lỗi schema. TV5 sở hữu callback `FILE_META`/`FILE_CHUNK`/`FILE_END`; TV5 chỉ gửi ACK sau khi thao tác file tương ứng thành công. Callback avatar cần chốt với TV2/TV5: avatar nhỏ có thể nằm trong JSON metadata, avatar lớn đi theo chunk và dùng cùng quy tắc giới hạn kích thước.
+TV4 sở hữu callback `TEXT`/`EMOJI` và lỗi schema. TV5 sở hữu callback `FILE_OFFER`/`FILE_CHUNK`/`FILE_END`; TV5 chỉ gửi ACK sau khi thao tác file tương ứng thành công. Callback avatar cần chốt với TV2/TV5: avatar nhỏ có thể nằm trong JSON metadata, avatar lớn đi theo chunk và dùng cùng quy tắc giới hạn kích thước.
 
 ## 4. Tên và schema message cần giữ cố định
 
-Mọi message dùng `header = {message_id, message_type, sender_id, receiver_id, timestamp}` và `payload` là object. `message_id` và `transfer_id` là UUID dạng chuỗi; `timestamp` là UTC ISO 8601. `sender_id`/`receiver_id` là ID peer, không phải IP. Tên loại message viết hoa. Các tên dưới đây **cần TV5 duyệt trước khi triển khai**:
+Mọi message dùng `header = {message_id, message_type, sender_id, receiver_id, timestamp}` và `payload` là object. `message_id` và `transfer_id` là UUID dạng chuỗi; `timestamp` là UTC ISO 8601. `sender_id`/`receiver_id` là ID peer, không phải IP. Tên loại message viết hoa. Với file, `header.message_type = "FILE_<ACTION>"` và `payload.action = "<ACTION>"`; hai giá trị phải khớp. Ví dụ `FILE_OFFER` dùng `action: "OFFER"`. Các trường payload còn lại là hợp đồng để TV5 triển khai:
 
 | `message_type` | Trường bắt buộc trong `payload` | Người xử lý |
 | --- | --- | --- |
 | `TEXT` | `text: str` | TV4/UI |
 | `EMOJI` | `emoji: str` (UTF-8) | TV4/UI |
-| `FILE_META` | `transfer_id`, `file_name`, `file_size`, `chunk_size`, `total_chunks` | TV5 |
-| `FILE_CHUNK` | `transfer_id`, `chunk_index`, `data_b64` | TV5 |
-| `FILE_END` | `transfer_id`, `sha256` | TV5 |
+| `FILE_OFFER` | `action: "OFFER"`, `transfer_id`, `file_name`, `file_size`, `chunk_size`, `total_chunks` | TV5 |
+| `FILE_CHUNK` | `action: "CHUNK"`, `transfer_id`, `chunk_index`, `data_b64` | TV5 |
+| `FILE_END` | `action: "END"`, `transfer_id`, `sha256` | TV5 |
 | `AVATAR_META` | `transfer_id`, `file_size`, `total_chunks` | TV5/UI, cần chốt chủ sở hữu |
 | `AVATAR_CHUNK` | `transfer_id`, `chunk_index`, `data_b64` | TV5/UI, cần chốt chủ sở hữu |
 | `ACK` | `reply_to_message_id`, `status`; thêm `transfer_id`, `chunk_index` khi áp dụng | Bên gửi ban đầu |
@@ -88,11 +88,11 @@ Mọi message dùng `header = {message_id, message_type, sender_id, receiver_id,
 
 `chunk_index` bắt đầu từ **0**; `total_chunks` là tổng số chunk. File rỗng có `total_chunks = 0` và không có `FILE_CHUNK`. Chunk bytes được mã hóa base64 thành `data_b64`; kích thước thô đề xuất tối đa **48 KiB** để còn chỗ cho JSON và tránh vượt giới hạn message. `file_name` chỉ là tên file, không phải đường dẫn. Bên nhận kiểm tra chỉ số chunk, số byte, kích thước file và SHA-256 trước khi xác nhận hoàn tất.
 
-Tài liệu `DOCX/docs/message_protocol.md` hiện mô tả `FILE` với trường `action`; trước khi triển khai cần cập nhật tài liệu đó theo lựa chọn `FILE_META`/`FILE_CHUNK`/`FILE_END`, hoặc cả nhóm giữ `FILE` và quy định `action`. Không dùng hai cách đặt tên cùng lúc.
+Tài liệu `DOCX/docs/message_protocol.md` hiện mô tả `FILE` với trường `action`; cần cập nhật tài liệu chung đó sang `FILE_<ACTION>` trước khi dùng làm đặc tả chính thức. Ví dụ cũ `payload.action = "FILE_OFFER"` cần đổi thành `"OFFER"` theo quy tắc khớp hậu tố đã chốt.
 
 ## 5. ACK, lỗi, retry và progress
 
-- ACK `TEXT`/`EMOJI` sau khi handler kiểm tra và chấp nhận message. ACK `FILE_META` sau khi bên nhận tạo tác vụ. ACK `FILE_CHUNK` sau khi chunk được ghi thành công. ACK `FILE_END` sau khi kiểm tra đủ byte/SHA-256 và đổi file tạm thành file hoàn chỉnh.
+- ACK `TEXT`/`EMOJI` sau khi handler kiểm tra và chấp nhận message. ACK `FILE_OFFER` sau khi bên nhận tạo tác vụ. ACK `FILE_CHUNK` sau khi chunk được ghi thành công. ACK `FILE_END` sau khi kiểm tra đủ byte/SHA-256 và đổi file tạm thành file hoàn chỉnh.
 - ACK cho chunk chứa cả `reply_to_message_id`, `transfer_id`, `chunk_index`. Bên gửi chỉ tính chunk đã xác nhận sau khi nhận ACK tương ứng. Khi timeout, có thể gửi lại cùng `message_id` và `chunk_index`; bên nhận phải nhận diện bản trùng và không ghi hai lần.
 - `ERROR.error_code` là mã ổn định, đề xuất: `INVALID_MESSAGE`, `UNKNOWN_TRANSFER`, `INVALID_CHUNK`, `WRITE_FAILED`, `CHECKSUM_MISMATCH`, `TIMEOUT`. `detail` chỉ phục vụ hiển thị/log, không dùng để phân nhánh logic.
 - TV5 phát progress theo `transfer_id`, `bytes_done`, `total_bytes`, `speed_bytes_per_sec`, `status`. Bên gửi tính `bytes_done` từ chunk đã ACK; bên nhận tính từ byte đã ghi. Trạng thái dùng `WAITING`, `TRANSFERRING`, `COMPLETED`, `FAILED`, `CANCELLED`.
@@ -100,9 +100,9 @@ Tài liệu `DOCX/docs/message_protocol.md` hiện mô tả `FILE` với trườ
 
 ## 6. Điều kiện bàn giao và kiểm tra tích hợp
 
-1. TV4 hoàn thiện và kiểm tra protocol/validator/handler, có ví dụ `TEXT`, `EMOJI`, `FILE_META`, `FILE_CHUNK`, ACK và ERROR. TV4 cập nhật import khi chuyển `PeerManager` và discovery.
+1. TV4 hoàn thiện và kiểm tra protocol/validator/handler, có ví dụ `TEXT`, `EMOJI`, `FILE_OFFER`, `FILE_CHUNK`, ACK và ERROR. TV4 cập nhật import khi chuyển `PeerManager` và discovery.
 2. TV5 dùng đúng API và schema đã chốt; không tạo bộ framing khác trong sender/listener. Điểm chạy chung nối callback file của TV5 với handler.
 3. Hai bên kiểm tra hai peer gửi text Unicode, emoji, file rỗng và file nhiều chunk; thử message lỗi, ngắt giữa chừng, gửi chunk trùng và checksum sai. Kiểm tra progress tăng đúng và trạng thái kết thúc.
 4. Sau khi luồng chung chạy được, mới dọn các điểm chạy và protocol cũ còn trùng chức năng.
 
-**Các quyết định cần TV5 xác nhận:** tên `FILE_*` hay `FILE` + `action`; callback `MessageHandler.register()`; ACK từng chunk và retry; owner của avatar; thời điểm dùng giao thức mã hóa của TV1. Khi chốt, đổi trạng thái tài liệu thành “Đã thống nhất” và dùng nó làm chuẩn cho hai nhánh.
+**Các quyết định còn cần TV5 xác nhận:** callback `MessageHandler.register()`; ACK từng chunk và retry; owner của avatar; thời điểm dùng giao thức mã hóa của TV1. Tên `FILE_<ACTION>` và `payload.action` đã chốt; các phần còn lại cần review trước khi coi toàn bộ tài liệu là “Đã thống nhất”.

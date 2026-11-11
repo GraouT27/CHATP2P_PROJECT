@@ -10,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "CODE"))
 
 from p2p_node.discovery import listen_discovery, send_discovery
+from p2p_node.handler import MessageHandler
 from p2p_node.peer_manager import PeerManager
 from shared.protocol import (
     create_message,
@@ -71,6 +72,49 @@ class ProtocolTests(unittest.TestCase):
         manager = PeerManager()
         manager.add_peer("peer-B", "127.0.0.1", 7000)
         self.assertEqual(manager.get_peer("peer-B")["tcp_port"], 7000)
+
+    def test_file_action_matches_message_type(self):
+        message = create_message(
+            "peer-A", "peer-B", "FILE_CHUNK",
+            {"action": "CHUNK", "transfer_id": "transfer-1"},
+        )
+        self.assertEqual(message["payload"]["action"], "CHUNK")
+        message["payload"]["action"] = "OFFER"
+        with self.assertRaises(ValueError):
+            encode_message(message)
+
+    def test_handler_routes_text_and_file_without_owning_socket(self):
+        handler = MessageHandler()
+        routed = []
+        replies = []
+        handler.register(
+            "TEXT", lambda message, send_reply: routed.append(
+                ("text", message["payload"]["text"])
+            )
+        )
+        handler.register(
+            "FILE_CHUNK", lambda message, send_reply: routed.append(
+                ("file", message["payload"]["action"])
+            )
+        )
+
+        handler.handle_message(
+            create_message("peer-A", "peer-B", "TEXT", {"text": "xin chào"}),
+            replies.append,
+        )
+        handler.handle_message(
+            create_message("peer-A", "peer-B", "FILE_CHUNK",
+                           {"action": "CHUNK", "transfer_id": "transfer-1"}),
+            replies.append,
+        )
+        self.assertEqual(routed, [("text", "xin chào"), ("file", "CHUNK")])
+        self.assertEqual(replies, [])
+
+    def test_handler_rejects_unregistered_type(self):
+        handler = MessageHandler()
+        message = create_message("peer-A", "peer-B", "EMOJI", {"emoji": "😊"})
+        with self.assertRaises(ValueError):
+            handler.handle_message(message, lambda reply: None)
 
 
 if __name__ == "__main__":
