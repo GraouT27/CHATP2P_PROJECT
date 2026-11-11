@@ -1,0 +1,9 @@
+{
+    "peer_id": "peer-B",
+    "listen_host": "127.0.0.1",
+    "listen_port": 7000,
+    "peer_host": "127.0.0.1",
+    "peer_port": 6000,
+    "discovery_port": 9999,
+    "timeout": 10
+}
