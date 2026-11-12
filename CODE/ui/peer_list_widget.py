@@ -62,7 +62,11 @@ class PeerItemWidget(QWidget):
         layout.addLayout(info_layout, 1)
 
     def set_status(self, status: str):
-        """Cập nhật trạng thái và đổi màu QSS."""
+        """
+        Cập nhật trạng thái Online/Offline và ép Qt nạp lại style QSS.
+        Lý do phải dùng unpolish() rồi polish(): trong Qt, khi thay đổi dynamic property
+        ([status="offline"]), QSS không tự vẽ lại màu ngay mà cần tháo/nạp lại style.
+        """
         self.status = status
         self.status_label.setText(status.capitalize())
         self.status_label.setProperty("status", status)
@@ -74,17 +78,20 @@ class PeerItemWidget(QWidget):
             self.name_label.setStyleSheet("color: #ffffff; font-size: 14px; font-weight: bold;")
 
     def set_username(self, name: str):
-        self.username = name
-        self.name_label.setText(name)
-        self.avatar.set_name(name)
+        safe = str(name or "Peer")
+        self.username = safe
+        self.name_label.setText(safe)
+        self.avatar.set_name(safe)
 
     def set_avatar_path(self, path: str):
         self.avatar_path = path
         self.avatar.set_image_path(path)
 
     def set_last_message(self, text: str):
-        if text:
-            disp = text if len(text) <= 26 else text[:26] + "..."
+        # Loại bỏ \r và \n để nội dung xem trước luôn nằm gọn trên 1 dòng, tránh vỡ chiều cao item.
+        clean = str(text or "").replace("\r", " ").replace("\n", " ").strip()
+        if clean:
+            disp = clean if len(clean) <= 26 else clean[:26] + "..."
             self.last_msg_label.setText(disp)
             self.last_msg_label.setVisible(True)
 
@@ -168,6 +175,10 @@ class PeerListWidget(QWidget):
             return
 
         item = QListWidgetItem(self.list_widget)
+        # Lưu trực tiếp peer_id vào Qt.ItemDataRole.UserRole của QListWidgetItem.
+        # Lý do: nếu sau này danh sách bị sắp xếp hoặc xóa bớt dòng, lấy ID theo chỉ số dict sẽ bị lệch;
+        # UserRole gắn chặt ID vào đúng item giúp chọn Peer luôn chính xác.
+        item.setData(Qt.ItemDataRole.UserRole, peer_id)
         item.setSizeHint(QSize(280, 68))
 
         widget = PeerItemWidget(peer_id, username, ip, port, status, avatar_path, self.list_widget)
@@ -186,11 +197,10 @@ class PeerListWidget(QWidget):
         items = self.list_widget.selectedItems()
         if not items:
             return
-        row = self.list_widget.row(items[0])
-        # Tìm peer_id tương ứng với row
-        peer_ids = list(self._peer_widgets.keys())
-        if 0 <= row < len(peer_ids):
-            self.peer_selected.emit(peer_ids[row])
+        # Đọc lại peer_id trực tiếp từ UserRole của item đang được chọn.
+        peer_id = items[0].data(Qt.ItemDataRole.UserRole)
+        if peer_id:
+            self.peer_selected.emit(str(peer_id))
 
     def get_peer_widget(self, peer_id: str) -> PeerItemWidget | None:
         return self._peer_widgets.get(peer_id)
@@ -201,10 +211,11 @@ class PeerListWidget(QWidget):
 
     def select_peer(self, peer_id: str):
         """Chọn trực quan một Peer trên danh sách theo peer_id."""
-        peer_ids = list(self._peer_widgets.keys())
-        if peer_id in peer_ids:
-            row = peer_ids.index(peer_id)
-            self.list_widget.setCurrentRow(row)
+        for row in range(self.list_widget.count()):
+            item = self.list_widget.item(row)
+            if item and item.data(Qt.ItemDataRole.UserRole) == peer_id:
+                self.list_widget.setCurrentRow(row)
+                return
 
     def get_all_peers(self, online_only: bool = False) -> list[tuple[str, str]]:
         res = []

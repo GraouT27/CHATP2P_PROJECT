@@ -6,10 +6,11 @@ Kết nối toàn bộ tầng UI với lõi mạng p2p_node, crypto_manager và 
 import os
 import sys
 import time
+import base64
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QTimer, QSize
-from PyQt6.QtGui import QFont, QAction, QClipboard
+from PyQt6.QtGui import QFont, QAction, QClipboard, QImage
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QLineEdit, QSplitter, QFrame, QListView,
@@ -251,6 +252,7 @@ class MainWindow(QMainWindow):
 
         # Handler
         self.msg_handler.handshake_received.connect(self._on_handshake_received)
+        self.msg_handler.handshake_ack_received.connect(self._on_handshake_ack_received)
         self.msg_handler.key_exchange_done.connect(self._on_key_exchange_done)
         self.msg_handler.chat_received.connect(self._on_chat_received)
         self.msg_handler.file_start_received.connect(self.transfer_mgr.handle_file_start)
@@ -279,9 +281,16 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"🔗 Kết nối mới từ {peer_id}")
 
     def _on_peer_disconnected(self, peer_id: str):
+        # Lý do phải kiểm tra peer_id in _peer_info_map:
+        # P2PListener phát tín hiệu peer_disconnected cho MỌI kết nối socket TCP đóng lại,
+        # kể cả cổng socket tạm thời (ephemeral port) dùng để gửi xong 1 tin nhắn rồi đóng.
+        # Nếu không bỏ qua cổng tạm, UI sẽ tạo nhầm cửa sổ chat rác và hiện cảnh báo mất kết nối giả.
+        if peer_id not in self._peer_info_map:
+            self.transfer_mgr.cancel_all_for_peer(peer_id)
+            return
+
         log.warning(f"Peer ngắt kết nối: {peer_id}")
-        if peer_id in self._peer_info_map:
-            self._peer_info_map[peer_id]["status"] = "offline"
+        self._peer_info_map[peer_id]["status"] = "offline"
 
         # Hủy các tác vụ truyền file dở dang và xóa file .part
         self.transfer_mgr.cancel_all_for_peer(peer_id)
@@ -306,8 +315,9 @@ class MainWindow(QMainWindow):
 
     def _on_peer_discovered(self, peer_id: str, username: str, ip: str, port: int):
         """Khi tìm thấy Peer mới qua mạng LAN."""
-        self._peer_info_map[peer_id] = {"ip": ip, "port": port, "username": username, "status": "online"}
-        self.peer_list_panel.add_or_update_peer(peer_id, username, ip, port, "online")
+        safe_name = self._sanitize_username(username)
+        self._peer_info_map[peer_id] = {"ip": ip, "port": port, "username": safe_name, "status": "online"}
+        self.peer_list_panel.add_or_update_peer(peer_id, safe_name, ip, port, "online")
 
         # Tự động gửi Handshake nếu chưa có khóa
         if not self.crypto_mgr.has_session_key(peer_id):
@@ -329,13 +339,80 @@ class MainWindow(QMainWindow):
             self.input_field.setEnabled(False)
             self.input_field.setPlaceholderText("Peer đã ngắt kết nối. Không thể gửi tin nhắn.")
 
+    @staticmethod
+    def _sanitize_username(username: str) -> str:
+        """Loại bỏ ký tự điều khiển và giới hạn độ dài tên người dùng để chống giả mạo hiển thị."""
+        cleaned = "".join(ch for ch in str(username or "") if ch >= " " and ch != "\x7f").strip()
+        return (cleaned[:64] or "Peer")
+
+    def _read_my_avatar_b64(self) -> str:
+        """Đọc và mã hóa Base64 ảnh avatar cá nhân (giới hạn <= 256 KB)."""
+        if self.avatar_path and os.path.exists(self.avatar_path):
+            try:
+                if os.path.getsize(self.avatar_path) <= 256 * 1024:
+                    with open(self.avatar_path, "rb") as f:
+                        return base64.b64encode(f.read()).decode("utf-8")
+            except Exception:
+                pass
+        return ""
+
+    @staticmethod
+    def _save_safe_avatar(canonical_peer_id: str, avatar_b64: str) -> str:
+        """
+        Giải mã và kiểm tra an toàn ảnh avatar trước khi lưu cache ra ổ đĩa.
+        Lý do không được ghi trực tiếp bytes decode ra file '.png':
+        1. Attacker có thể nhồi payload .exe/.bat/SVG độc hại đội lốt Base64 avatar.
+        2. Ảnh bị nén thành Image Bomb (ví dụ 100KB nhưng bung ra 20000x20000 px) sẽ làm treo/tràn RAM UI.
+        Giải pháp: kiểm tra size + magic bytes (PNG/JPEG) + nạp qua QImage để xác thực kích thước thật
+        rồi re-encode lại thành ảnh PNG nhỏ (<= 128x128) trước khi ghi đĩa.
+        """
+        if not avatar_b64 or not isinstance(avatar_b64, str) or len(avatar_b64) > 350_000:
+            return ""
+        try:
+            # validate=True buộc base64 phải hợp lệ nghiêm ngặt, từ chối ký tự rác tiêm nhiễm.
+            avatar_bytes = base64.b64decode(avatar_b64.encode("utf-8"), validate=True)
+            if not avatar_bytes or len(avatar_bytes) > 256 * 1024:
+                return ""
+            # Kiểm tra chữ ký đầu tệp (Magic Bytes) của PNG hoặc JPEG.
+            is_png = avatar_bytes.startswith(b"\x89PNG\r\n\x1a\n")
+            is_jpeg = avatar_bytes.startswith(b"\xff\xd8\xff")
+            if not (is_png or is_jpeg):
+                log.warning(f"Từ chối avatar không phải PNG/JPEG từ {canonical_peer_id}")
+                return ""
+
+            img = QImage.fromData(avatar_bytes)
+            if img.isNull() or img.width() <= 0 or img.height() <= 0 or img.width() > 2048 or img.height() > 2048:
+                log.warning(f"Từ chối avatar kích thước bất thường từ {canonical_peer_id}")
+                return ""
+
+            safe_img = img.scaled(
+                128, 128,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            cache_dir = os.path.join(config.download_dir, "peer_avatars")
+            os.makedirs(cache_dir, exist_ok=True)
+            safe_id = "".join(c if c.isalnum() else "_" for c in canonical_peer_id)
+            avatar_path = os.path.abspath(os.path.join(cache_dir, f"avatar_{safe_id}.png"))
+            cache_abs = os.path.abspath(cache_dir)
+            if not avatar_path.startswith(cache_abs + os.sep):
+                return ""
+            # Gọi safe_img.save(..., "PNG") để ghi lại dữ liệu pixel đã làm sạch thay vì bytes thô từ mạng.
+            if safe_img.save(avatar_path, "PNG"):
+                return avatar_path
+            return ""
+        except Exception as e:
+            log.warning(f"Không thể giải mã avatar an toàn từ {canonical_peer_id}: {e}")
+            return ""
+
     def _find_canonical_peer_id(self, raw_peer_id: str, sender_name: str = "", sender_port: int = 0) -> str:
         """
-        Ánh xạ kết nối socket tạm thời (ephemeral port) về đúng Canonical Peer ID (listen_port)
-        dựa trên sender_port, IP và Username.
+        Ánh xạ kết nối socket tạm thời (ephemeral port) về đúng Canonical Peer ID (<IP>:<listen_port>).
+        Cách dùng: gọi hàm này ở _on_chat_received để tin nhắn đến từ cổng ngẫu nhiên vẫn vào đúng khung chat của Peer.
         """
         raw_ip = raw_peer_id.split(":")[0] if ":" in raw_peer_id else raw_peer_id
-        if sender_port > 0:
+        # Ưu tiên 1: Ghép IP thật của socket kết nối + sender_port khai báo trong header.
+        if isinstance(sender_port, int) and not isinstance(sender_port, bool) and 1 <= sender_port <= 65535:
             target = f"{raw_ip}:{sender_port}"
             if target in self._peer_info_map:
                 return target
@@ -343,13 +420,15 @@ class MainWindow(QMainWindow):
         if raw_peer_id in self._peer_info_map:
             return raw_peer_id
 
-        # Tìm theo username
+        # Ưu tiên 2: Tìm theo username NHƯNG BẮT BUỘC phải cùng IP nguồn (info.get("ip") == raw_ip).
+        # Lý do: Nếu không kiểm tra cùng IP, kẻ tấn công ở máy khác chỉ cần đặt sender="Alice"
+        # để giả mạo và chèn tin nhắn lừa đảo vào đúng hội thoại của Alice thật.
         if sender_name:
             for pid, info in self._peer_info_map.items():
-                if info.get("username") == sender_name:
+                if info.get("ip") == raw_ip and info.get("username") == sender_name:
                     return pid
 
-        # Tìm theo IP nếu chỉ có 1 peer từ IP đó
+        # Ưu tiên 3: Nếu chỉ có duy nhất 1 Peer đang đăng ký ở IP đó thì ánh xạ về Peer đó.
         matching = [pid for pid, info in self._peer_info_map.items() if info.get("ip") == raw_ip]
         if len(matching) == 1:
             return matching[0]
@@ -359,62 +438,73 @@ class MainWindow(QMainWindow):
     def _send_handshake(self, peer_id: str, ip: str, port: int):
         """Gửi gói tin Handshake kèm RSA Public Key và Avatar sang Peer."""
         pub_key = self.crypto_mgr.get_public_key_pem()
-        avatar_b64 = ""
-        if self.avatar_path and os.path.exists(self.avatar_path):
-            try:
-                import base64
-                with open(self.avatar_path, "rb") as f:
-                    avatar_b64 = base64.b64encode(f.read()).decode("utf-8")
-            except Exception:
-                pass
+        avatar_b64 = self._read_my_avatar_b64()
         h = make_handshake_header(self.username, self.listen_port, pub_key, avatar_b64=avatar_b64)
         send_message_direct(ip, port, h)
 
     def _on_handshake_received(self, peer_id: str, username: str, listen_port: int, pub_key: str, avatar_b64: str):
-        ip = peer_id.split(":")[0]
-        actual_port = listen_port if listen_port > 0 else int(peer_id.split(":")[1])
-        canonical_peer_id = f"{ip}:{actual_port}"
+        self._handle_handshake(peer_id, username, listen_port, pub_key, avatar_b64, is_ack=False)
 
-        avatar_path = ""
-        if avatar_b64:
+    def _on_handshake_ack_received(self, peer_id: str, username: str, listen_port: int, pub_key: str, avatar_b64: str):
+        self._handle_handshake(peer_id, username, listen_port, pub_key, avatar_b64, is_ack=True)
+
+    def _handle_handshake(self, peer_id: str, username: str, listen_port: int, pub_key: str, avatar_b64: str, is_ack: bool = False):
+        ip = peer_id.split(":")[0] if ":" in peer_id else peer_id
+        raw_port = 0
+        if ":" in peer_id:
             try:
-                import base64
-                avatar_bytes = base64.b64decode(avatar_b64.encode("utf-8"))
-                cache_dir = os.path.join(config.download_dir, "peer_avatars")
-                os.makedirs(cache_dir, exist_ok=True)
-                safe_name = f"avatar_{canonical_peer_id.replace(':', '_').replace('.', '_')}.png"
-                avatar_path = os.path.join(cache_dir, safe_name)
-                with open(avatar_path, "wb") as f:
-                    f.write(avatar_bytes)
-            except Exception as e:
-                log.warning(f"Không thể giải mã avatar từ {canonical_peer_id}: {e}")
+                raw_port = int(peer_id.split(":")[1])
+            except ValueError:
+                raw_port = 0
 
+        actual_port = listen_port if (isinstance(listen_port, int) and 1 <= listen_port <= 65535) else raw_port
+        if not (1 <= actual_port <= 65535):
+            log.warning(f"Từ chối Handshake từ {peer_id}: cổng lắng nghe không hợp lệ ({actual_port})")
+            return
+
+        canonical_peer_id = f"{ip}:{actual_port}"
+        safe_username = self._sanitize_username(username)
+
+        if pub_key:
+            self.crypto_mgr.register_peer_public_key(canonical_peer_id, pub_key)
+
+        avatar_path = self._save_safe_avatar(canonical_peer_id, avatar_b64)
+
+        old_info = self._peer_info_map.get(canonical_peer_id, {})
+        final_avatar = avatar_path or old_info.get("avatar_path", "")
         self._peer_info_map[canonical_peer_id] = {
-            "ip": ip, "port": actual_port, "username": username,
-            "status": "online", "avatar_path": avatar_path
+            "ip": ip, "port": actual_port, "username": safe_username,
+            "status": "online", "avatar_path": final_avatar
         }
-        self.peer_list_panel.add_or_update_peer(canonical_peer_id, username, ip, actual_port, "online", avatar_path)
+        self.peer_list_panel.add_or_update_peer(canonical_peer_id, safe_username, ip, actual_port, "online", final_avatar)
 
-        # Nếu là gói handshake đến, gửi lại handshake_ack kèm Public Key của mình và Avatar
-        if listen_port > 0:
-            my_avatar_b64 = ""
-            if self.avatar_path and os.path.exists(self.avatar_path):
-                try:
-                    import base64
-                    with open(self.avatar_path, "rb") as f:
-                        my_avatar_b64 = base64.b64encode(f.read()).decode("utf-8")
-                except Exception:
-                    pass
-            ack_h = make_handshake_ack_header(self.username, self.crypto_mgr.get_public_key_pem(), avatar_b64=my_avatar_b64)
+        if self._current_peer_id == canonical_peer_id:
+            self.header_name_label.setText(safe_username)
+            if final_avatar:
+                self.header_avatar.set_image_path(final_avatar)
+
+        # Chỉ bên nhận gói handshake ban đầu (is_ack=False) mới phản hồi handshake_ack và sinh session key.
+        # Lý do: Nếu xử lý handshake_ack mà lại tiếp tục gửi handshake_ack hoặc sinh đè khóa mới,
+        # hai máy sẽ bị lặp vô tận (handshake loop) hoặc làm lệch khóa AES-256 giữa 2 chiều.
+        if not is_ack:
+            ack_h = make_handshake_ack_header(
+                self.username,
+                self.crypto_mgr.get_public_key_pem(),
+                avatar_b64=self._read_my_avatar_b64(),
+                # Bắt buộc đính kèm listen_port của mình để bên khởi tạo map đúng IP:listen_port (tránh tạo Ghost Peer).
+                listen_port=self.listen_port,
+            )
             send_message_direct(ip, actual_port, ack_h)
 
-        # Bên khởi tạo sinh Khóa phiên AES-256 và gửi sang
-        enc_session_key = self.crypto_mgr.generate_and_encrypt_session_key(canonical_peer_id)
-        if enc_session_key:
-            key_h = make_key_exchange_header(self.username, enc_session_key)
-            send_message_direct(ip, actual_port, key_h)
+            if not self.crypto_mgr.has_session_key(canonical_peer_id):
+                enc_session_key = self.crypto_mgr.generate_and_encrypt_session_key(canonical_peer_id)
+                if enc_session_key:
+                    key_h = make_key_exchange_header(
+                        self.username, enc_session_key, listen_port=self.listen_port
+                    )
+                    send_message_direct(ip, actual_port, key_h)
 
-        self._add_system_message(canonical_peer_id, f"🔒 Đã thiết lập kênh bảo mật RSA/AES-256 với {username}.")
+        self._add_system_message(canonical_peer_id, f"🔒 Đã thiết lập kênh bảo mật RSA/AES-256 với {safe_username}.")
 
     def _on_key_exchange_done(self, peer_id: str):
         self.statusBar().showMessage(f"✅ Đã thiết lập mã hóa AES-256 với {peer_id}")
@@ -464,6 +554,19 @@ class MainWindow(QMainWindow):
         self.reply_preview.set_reply(msg.sender, msg.content, msg.msg_id)
         self.input_field.setFocus()
 
+    def _encrypt_text_if_ready(self, peer_id: str, text: str) -> tuple[str, bool, Optional[str]]:
+        """
+        Helper dùng chung cho cả Gửi tin nhắn mới và Chuyển tiếp (Forward).
+        Cách dùng: truyền peer_id đích và chuỗi bản rõ; trả về (nội_dung_gửi, is_encrypted, nonce_b64).
+        Lý do tách helper: đảm bảo mọi đường đi gửi tin (kể cả Forward) đều đi qua cùng một cơ chế mã hóa AES-256-GCM.
+        """
+        if self.crypto_mgr.has_session_key(peer_id):
+            enc_res = self.crypto_mgr.encrypt_text(peer_id, text)
+            if enc_res:
+                cipher_b64, nonce_b64 = enc_res
+                return cipher_b64, True, nonce_b64
+        return text, False, None
+
     def _send_chat_message(self):
         text = self.input_field.text().strip()
         if not text or not self._current_peer_id:
@@ -478,23 +581,9 @@ class MainWindow(QMainWindow):
         port = info["port"]
 
         reply_data = self.reply_preview.get_reply_data()
-
-        # Mã hóa AES-256 nếu đã có session key
-        is_encrypted = False
-        payload_bytes = b""
-        nonce_str = None
-
-        if self.crypto_mgr.has_session_key(self._current_peer_id):
-            enc_res = self.crypto_mgr.encrypt_text(self._current_peer_id, text)
-            if enc_res:
-                cipher_b64, nonce_b64 = enc_res
-                is_encrypted = True
-                text_to_header = cipher_b64
-                nonce_str = nonce_b64
-            else:
-                text_to_header = text
-        else:
-            text_to_header = text
+        text_to_header, is_encrypted, nonce_str = self._encrypt_text_if_ready(
+            self._current_peer_id, text
+        )
 
         header = make_chat_header(
             username=self.username,
@@ -505,7 +594,7 @@ class MainWindow(QMainWindow):
         )
         header["sender_port"] = self.listen_port
 
-        ok, err = send_message_direct(ip, port, header, payload_bytes)
+        ok, err = send_message_direct(ip, port, header, b"")
         if not ok:
             self._on_peer_disconnected(self._current_peer_id)
             QMessageBox.warning(self, "Lỗi Gửi Tin Nhắn", f"Không thể gửi tới {self._current_peer_id}:\n{err}")
@@ -541,7 +630,7 @@ class MainWindow(QMainWindow):
 
         msg = MessageData(
             msg_id=data.get("msg_id"),
-            sender=data.get("sender"),
+            sender=self._sanitize_username(data.get("sender")),
             content=data.get("content"),
             timestamp=data.get("timestamp"),
             is_sent=False,
@@ -667,14 +756,29 @@ class MainWindow(QMainWindow):
         dlg = ForwardDialog(msg.content, peers, self)
         if dlg.exec():
             selected = dlg.get_selected_peers()
+            sent_count = 0
             for pid in selected:
                 info = self._peer_info_map.get(pid)
                 if info and info.get("status") == "online":
-                    fwd_from = {"original_sender": msg.sender, "original_content": msg.content}
-                    h = make_chat_header(self.username, msg.content, forward_from=fwd_from)
+                    text_to_header, is_encrypted, nonce_str = self._encrypt_text_if_ready(pid, msg.content)
+                    # Bảo mật Forward: KHÔNG nhúng 'original_content' bản rõ vào forward_from vì JSON Header
+                    # đi qua mạng không bị mã hóa toàn phần; chỉ giữ 'original_sender' để UI hiển thị dòng trích dẫn.
+                    fwd_from = {"original_sender": self._sanitize_username(msg.sender)}
+                    h = make_chat_header(
+                        self.username,
+                        text_to_header,
+                        forward_from=fwd_from,
+                        is_encrypted=is_encrypted,
+                        nonce=nonce_str,
+                    )
+                    # Gắn sender_port để Peer nhận biết đúng Canonical ID khi giải mã gói Forward.
                     h["sender_port"] = self.listen_port
-                    send_message_direct(info["ip"], info["port"], h)
-            self.statusBar().showMessage(f"↪ Đã chuyển tiếp tin nhắn tới {len(selected)} Peer")
+                    ok, err = send_message_direct(info["ip"], info["port"], h)
+                    if ok:
+                        sent_count += 1
+                    else:
+                        log.warning(f"Chuyển tiếp tới {pid} thất bại: {err}")
+            self.statusBar().showMessage(f"↪ Đã chuyển tiếp tin nhắn tới {sent_count}/{len(selected)} Peer")
 
     # ========================== DIALOGS & EMOJI ==========================
 
@@ -694,7 +798,7 @@ class MainWindow(QMainWindow):
         dlg = ConfigDialog(self.username, self.listen_port, self)
         if dlg.exec():
             res = dlg.get_config()
-            self.username = res["username"]
+            self.username = self._sanitize_username(res["username"])
             config.username = self.username
             if res.get("avatar_path"):
                 self.avatar_path = res["avatar_path"]
@@ -707,6 +811,9 @@ class MainWindow(QMainWindow):
             peer_ip = res.get("peer_ip")
             peer_port = res.get("peer_port")
             if peer_ip and peer_port > 0:
+                if peer_ip in ("127.0.0.1", "localhost", "::1") and peer_port == self.listen_port:
+                    QMessageBox.warning(self, "Lỗi Kết Nối", "Không thể kết nối tới chính cổng lắng nghe của bạn!")
+                    return
                 pid = f"{peer_ip}:{peer_port}"
                 self._peer_info_map[pid] = {"ip": peer_ip, "port": peer_port, "username": f"Peer_{peer_port}", "status": "online"}
                 self.peer_list_panel.add_or_update_peer(pid, f"Peer_{peer_port}", peer_ip, peer_port, "online")

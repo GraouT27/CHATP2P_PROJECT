@@ -29,13 +29,16 @@ class AvatarWidget(QLabel):
                  color: str = "#1a73e8", image_path: str = "", parent=None):
         super().__init__(parent)
         self._name = str(name or "")
-        self._size = size
-        self._color = color
+        # Chặn size < 16 để tránh rect_f có bán kính âm/0 làm lỗi QPainterPath khi vẽ hình tròn.
+        self._size = max(int(size or 40), 16)
+        # Kiểm tra QColor.isValid() trước khi lưu để tránh vẽ nền đen nếu chuỗi màu sai cú pháp.
+        self._color = color if QColor(str(color or "")).isValid() else "#1a73e8"
         self._image_path = str(image_path or "")
-        self.setFixedSize(size, size)
+        self.setFixedSize(self._size, self._size)
         self._render_avatar()
 
     def _render_avatar(self):
+        # Tạo QPixmap trong suốt (alpha = 0) để phần góc vuông bên ngoài hình tròn không bị đen nền.
         pixmap = QPixmap(self._size, self._size)
         pixmap.fill(QColor(0, 0, 0, 0))
 
@@ -43,9 +46,11 @@ class AvatarWidget(QLabel):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         # Tạo đường bao tròn chuẩn kiểu float trong QRectF
+        # (PyQt6 yêu cầu int hoặc QRectF cho setClipPath/drawText, không nhận trực tiếp 4 số float rời).
         rect_f = QRectF(1.0, 1.0, float(self._size - 2), float(self._size - 2))
         path = QPainterPath()
         path.addEllipse(rect_f)
+        # setClipPath cắt bỏ mọi pixel vẽ ra ngoài hình tròn, tạo hiệu ứng Avatar bo tròn mượt.
         painter.setClipPath(path)
 
         # 1. Nếu có file ảnh avatar hợp lệ
@@ -242,28 +247,57 @@ class EmojiPicker(QWidget):
 # ========================== MESSAGE MODEL & DELEGATE ==========================
 
 class MessageData:
+    """
+    Đối tượng dữ liệu 1 tin nhắn được làm sạch trước khi đưa vào QListView.
+    Cách dùng: luôn bọc dữ liệu nhận từ mạng qua MessageData thay vì truyền dict thô vào UI.
+    """
+    # Giới hạn độ dài tin nhắn hiển thị để QFontMetrics.boundingRect không bị đơ CPU (GUI DoS)
+    # nếu Peer gửi chuỗi rác vài trăm KB - hàng MB.
+    MAX_CONTENT_LEN = 10000
+
     def __init__(self, msg_id: str, sender: str, content: str, timestamp: float,
                  is_sent: bool, reply_to: dict = None, forward_from: dict = None,
                  is_system: bool = False, avatar_path: str = ""):
-        self.msg_id = msg_id
-        self.sender = sender
-        self.content = content
-        self.timestamp = timestamp
-        self.is_sent = is_sent
-        self.reply_to = reply_to
-        self.forward_from = forward_from
-        self.is_system = is_system
-        self.avatar_path = avatar_path
+        self.msg_id = str(msg_id or "")
+        self.sender = str(sender if sender is not None else "")[:64]
+        raw_content = "" if content is None else str(content)
+        if len(raw_content) > self.MAX_CONTENT_LEN:
+            raw_content = raw_content[:self.MAX_CONTENT_LEN] + "\n... [Đã rút gọn nội dung quá dài]"
+        self.content = raw_content
+        try:
+            self.timestamp = float(timestamp) if timestamp is not None else 0.0
+        except (TypeError, ValueError):
+            self.timestamp = 0.0
+        self.is_sent = bool(is_sent)
+        # Chỉ nhận dict hợp lệ cho reply_to và forward_from (chống Type Confusion gây crash khi paint).
+        self.reply_to = reply_to if isinstance(reply_to, dict) else None
+        self.forward_from = forward_from if isinstance(forward_from, dict) else None
+        self.is_system = bool(is_system)
+        self.avatar_path = str(avatar_path or "")
 
     @property
     def time_str(self) -> str:
         import time
-        t = time.localtime(self.timestamp)
-        return f"{t.tm_hour:02d}:{t.tm_min:02d}"
+        import math
+        try:
+            # Trên Windows, time.localtime() sẽ văng OSError/ValueError nếu timestamp âm, NaN hoặc > năm 2100 (4102444800).
+            if not math.isfinite(self.timestamp) or self.timestamp < 0 or self.timestamp > 4102444800:
+                return "--:--"
+            t = time.localtime(self.timestamp)
+            return f"{t.tm_hour:02d}:{t.tm_min:02d}"
+        except (TypeError, ValueError, OSError, OverflowError):
+            return "--:--"
 
 
 class MessageListModel(QAbstractListModel):
-    """Model danh sách tin nhắn phục vụ QListView Virtualization (Tối ưu hóa Chặng 7)."""
+    """
+    Model danh sách tin nhắn phục vụ QListView Virtualization (Tối ưu hóa Chặng 7).
+    Cách dùng: thay vì tạo hàng nghìn QWidget nặng nề, QListView chỉ gọi MessageDelegate.paint()
+    cho những tin nhắn đang nằm trong khung nhìn màn hình -> cuộn mượt ngay cả khi có nhiều tin.
+    """
+    # Giới hạn tối đa số tin nhắn giữ trong RAM cho mỗi cuộc hội thoại để chống tràn bộ nhớ (Memory Exhaustion).
+    MAX_MESSAGES = 5000
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._messages: list[MessageData] = []
@@ -277,7 +311,14 @@ class MessageListModel(QAbstractListModel):
         return self._messages[index.row()]
 
     def add_message(self, msg: MessageData):
+        # Xóa bớt tin nhắn cũ nhất (FIFO) nếu chạm ngưỡng MAX_MESSAGES và báo beginRemoveRows cho QListView đồng bộ.
+        if len(self._messages) >= self.MAX_MESSAGES:
+            overflow = len(self._messages) - self.MAX_MESSAGES + 1
+            self.beginRemoveRows(QModelIndex(), 0, overflow - 1)
+            del self._messages[:overflow]
+            self.endRemoveRows()
         row = len(self._messages)
+        # Bắt buộc gọi cặp beginInsertRows/endInsertRows để QListView cập nhật vùng cuộn mà không vẽ lại toàn bộ list.
         self.beginInsertRows(QModelIndex(), row, row)
         self._messages.append(msg)
         self.endInsertRows()
@@ -286,6 +327,14 @@ class MessageListModel(QAbstractListModel):
         """Thêm hàng loạt tin nhắn một lần để chống lag/giật UI khi tải nặng."""
         if not msgs:
             return
+        if len(msgs) > self.MAX_MESSAGES:
+            msgs = msgs[-self.MAX_MESSAGES:]
+        total = len(self._messages) + len(msgs)
+        if total > self.MAX_MESSAGES:
+            overflow = total - self.MAX_MESSAGES
+            self.beginRemoveRows(QModelIndex(), 0, overflow - 1)
+            del self._messages[:overflow]
+            self.endRemoveRows()
         first = len(self._messages)
         last = first + len(msgs) - 1
         self.beginInsertRows(QModelIndex(), first, last)
@@ -309,10 +358,19 @@ class MessageDelegate(QStyledItemDelegate):
     AVATAR_SIZE = 34
     PADDING = 10
     RADIUS = 10
+    # Giới hạn cache QPixmap tối đa 500 mục để tránh rò rỉ bộ nhớ đồ họa khi giao tiếp với nhiều Peer.
+    MAX_AVATAR_CACHE = 500
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._avatar_cache: dict[str, QPixmap] = {}
+
+    def _cache_put(self, key: str, pm: QPixmap):
+        """Lưu QPixmap vào cache theo cơ chế loại bỏ mục cũ nhất (FIFO) khi đạt ngưỡng."""
+        if len(self._avatar_cache) >= self.MAX_AVATAR_CACHE:
+            oldest_key = next(iter(self._avatar_cache))
+            del self._avatar_cache[oldest_key]
+        self._avatar_cache[key] = pm
 
     def _get_avatar(self, sender: str, avatar_path: str = "") -> QPixmap:
         cache_key = f"{sender}_{avatar_path}"
@@ -340,7 +398,7 @@ class MessageDelegate(QStyledItemDelegate):
                     y = (scaled.height() - self.AVATAR_SIZE) // 2
                     p.drawPixmap(0, 0, scaled, x, y, self.AVATAR_SIZE, self.AVATAR_SIZE)
                     p.end()
-                    self._avatar_cache[cache_key] = pm
+                    self._cache_put(cache_key, pm)
                     return pm
 
             colors = ["#1a73e8", "#34a853", "#ea4335", "#fbbc04", "#9c27b0", "#00bcd4"]
@@ -354,7 +412,7 @@ class MessageDelegate(QStyledItemDelegate):
             initial = sender[0].upper() if sender else "?"
             p.drawText(rect_f, Qt.AlignmentFlag.AlignCenter, initial)
             p.end()
-            self._avatar_cache[cache_key] = pm
+            self._cache_put(cache_key, pm)
         return self._avatar_cache[cache_key]
 
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
@@ -447,12 +505,12 @@ class MessageDelegate(QStyledItemDelegate):
         text_y = bubble_y + self.PADDING
 
         # Forward header
-        if msg.forward_from:
+        if isinstance(msg.forward_from, dict):
             painter.setPen(QColor("#fbbc04"))
             f_font = QFont("Segoe UI", 9)
             f_font.setItalic(True)
             painter.setFont(f_font)
-            orig = msg.forward_from.get("original_sender", "ai đó")
+            orig = str(msg.forward_from.get("original_sender") or "ai đó")[:64]
             painter.drawText(
                 QRectF(float(bubble_x + self.PADDING), float(text_y), float(bubble_w - self.PADDING * 2), 14.0),
                 Qt.AlignmentFlag.AlignLeft, f"↪ Chuyển tiếp từ {orig}"
@@ -460,7 +518,7 @@ class MessageDelegate(QStyledItemDelegate):
             text_y += 18
 
         # Reply quote box
-        if msg.reply_to:
+        if isinstance(msg.reply_to, dict):
             rx = float(bubble_x + self.PADDING)
             rw = float(bubble_w - self.PADDING * 2)
             painter.setBrush(QBrush(QColor("#2a2a40")))
@@ -474,12 +532,12 @@ class MessageDelegate(QStyledItemDelegate):
             # Reply content
             painter.setPen(QColor("#1a73e8"))
             painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-            rep_sender = msg.reply_to.get("sender", "Peer")
+            rep_sender = str(msg.reply_to.get("sender") or "Peer")[:64]
             painter.drawText(QRectF(rx + 8, float(text_y + 2), rw - 12, 16.0), Qt.AlignmentFlag.AlignLeft, rep_sender)
 
             painter.setPen(QColor("#b0b0c8"))
             painter.setFont(QFont("Segoe UI", 9))
-            rep_txt = msg.reply_to.get("content", "")
+            rep_txt = str(msg.reply_to.get("content") or "")
             if len(rep_txt) > 40:
                 rep_txt = rep_txt[:40] + "..."
             painter.drawText(QRectF(rx + 8, float(text_y + 18), rw - 12, 16.0), Qt.AlignmentFlag.AlignLeft, rep_txt)

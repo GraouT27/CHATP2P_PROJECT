@@ -1,0 +1,276 @@
+/* ========================== MAIN WINDOW ========================== */
+QMainWindow {
+    background-color: #1e1e2e;
+}
+
+QWidget {
+    color: #ffffff;
+    font-family: 'Segoe UI', 'Arial', sans-serif;
+    font-size: 13px;
+}
+
+/* ========================== PEER LIST ========================== */
+#peerListContainer {
+    background-color: #2d2d44;
+    border-right: 1px solid #4a4a66;
+}
+
+#peerListHeader {
+    background-color: #1e1e2e;
+    border-bottom: 1px solid #4a4a66;
+    padding: 10px 14px;
+}
+
+#peerListWidget {
+    background-color: #2d2d44;
+    border: none;
+    outline: none;
+    padding: 4px;
+}
+
+#peerListWidget::item {
+    background-color: transparent;
+    border-radius: 8px;
+    padding: 6px 10px;
+    margin: 2px 4px;
+    min-height: 52px;
+}
+
+#peerListWidget::item:hover {
+    background-color: #4a4a70;
+}
+
+#peerListWidget::item:selected {
+    background-color: #1a73e8;
+    color: #ffffff;
+}
+
+#peerItemWidget {
+    background-color: transparent;
+}
+
+#peerNameLabel {
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+#peerStatusLabel {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: bold;
+}
+
+#peerStatusLabel[status="online"] {
+    color: #34a853;
+    background-color: rgba(52, 168, 83, 0.2);
+}
+
+#peerStatusLabel[status="offline"] {
+    color: #ea4335;
+    background-color: rgba(234, 67, 53, 0.2);
+}
+
+#peerIpLabel {
+    color: #6c6c8a;
+    font-size: 11px;
+}
+
+/* ========================== CHAT BOX ========================== */
+#chatBoxContainer {
+    background-color: #1e1e2e;
+}
+
+#chatHeader {
+    background-color: #2d2d44;
+    border-bottom: 1px solid #4a4a66;
+    padding: 10px 16px;
+    min-height: 54px;
+}
+
+#chatPeerName {
+    color: #ffffff;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+#chatPeerStatus {
+    font-size: 12px;
+    color: #b0b0c8;
+}
+
+#chatPeerStatus[status="online"] {
+    color: #34a853;
+}
+
+#chatPeerStatus[status="offline"] {
+    color: #ea4335;
+}
+
+#messageListView {
+    background-color: #1e1e2e;
+    border: none;
+    outline: none;
+    padding: 10px 16px;
+}
+
+/* ========================== INPUT AREA ========================== */
+#inputArea {
+    background-color: #2d2d44;
+    border-top: 1px solid #4a4a66;
+    padding: 8px 14px;
+}
+
+#messageInput {
+    background-color: #1e1e2e;
+    color: #ffffff;
+    border: 1px solid #4a4a66;
+    border-radius: 20px;
+    padding: 8px 16px;
+    font-size: 13px;
+    selection-background-color: #1a73e8;
+}
+
+#messageInput:focus {
+    border-color: #1a73e8;
+}
+
+#messageInput:disabled {
+    background-color: #383850;
+    color: #6c6c8a;
+}
+
+QPushButton#sendButton {
+    background-color: #1a73e8;
+    color: #ffffff;
+    border: none;
+    border-radius: 20px;
+    padding: 8px 18px;
+    font-size: 13px;
+    font-weight: bold;
+}
+
+QPushButton#sendButton:hover {
+    background-color: #1557b0;
+}
+
+QPushButton#sendButton:disabled {
+    background-color: #383850;
+    color: #6c6c8a;
+}
+
+QPushButton#emojiButton, QPushButton#attachButton {
+    background-color: transparent;
+    border: 1px solid #4a4a66;
+    border-radius: 18px;
+    padding: 6px;
+    font-size: 16px;
+    min-width: 36px;
+    min-height: 36px;
+}
+
+QPushButton#emojiButton:hover, QPushButton#attachButton:hover {
+    background-color: #4a4a70;
+    border-color: #1a73e8;
+}
+
+/* ========================== REPLY PREVIEW ========================== */
+#replyPreview {
+    background-color: #2a2a40;
+    border-left: 3px solid #1a73e8;
+    border-radius: 4px;
+    margin: 4px 0px;
+    padding: 4px 8px;
+}
+
+#replyPreviewClose {
+    background: transparent;
+    border: none;
+    color: #6c6c8a;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+#replyPreviewClose:hover {
+    color: #ea4335;
+}
+
+/* ========================== FILE TRANSFER ROW ========================== */
+#fileRowWidget {
+    background-color: #3a3a52;
+    border: 1px solid #4a4a66;
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin: 3px 0px;
+}
+
+QProgressBar {
+    background-color: #1e1e2e;
+    border: 1px solid #4a4a66;
+    border-radius: 5px;
+    text-align: center;
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: bold;
+    height: 14px;
+}
+
+QProgressBar::chunk {
+    background-color: #1a73e8;
+    border-radius: 4px;
+}
+
+#fileCancelBtn {
+    background: transparent;
+    border: none;
+    color: #ea4335;
+    font-weight: bold;
+    font-size: 13px;
+    padding: 2px 6px;
+}
+
+#fileCancelBtn:hover {
+    background-color: rgba(234, 67, 53, 0.2);
+    border-radius: 4px;
+}
+
+/* ========================== EMOJI PICKER ========================== */
+#emojiPicker {
+    background-color: #2d2d44;
+    border: 1px solid #4a4a66;
+    border-radius: 10px;
+    padding: 6px;
+}
+
+#emojiPicker QPushButton {
+    background-color: transparent;
+    border: none;
+    border-radius: 6px;
+    font-size: 18px;
+    padding: 3px;
+}
+
+#emojiPicker QPushButton:hover {
+    background-color: #4a4a70;
+}
+
+/* ========================== SCROLLBAR ========================== */
+QScrollBar:vertical {
+    background-color: transparent;
+    width: 8px;
+}
+
+QScrollBar::handle:vertical {
+    background-color: #5a5a7a;
+    border-radius: 4px;
+    min-height: 25px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background-color: #7a7a9a;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
