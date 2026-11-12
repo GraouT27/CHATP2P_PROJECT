@@ -138,9 +138,10 @@ class SessionCrypto:
     def __init__(self, session_key: bytes, is_initiator: bool, salt: bytes = b""):
         if len(session_key) != KEY_SIZE:
             raise ValueError("Khoa phien phai dai 32 byte")
-        a2b = AESGCM(_derive(session_key, salt, b"p2p-chat a2b"))
-        b2a = AESGCM(_derive(session_key, salt, b"p2p-chat b2a"))
-        self._send, self._recv = (a2b, b2a) if is_initiator else (b2a, a2b)
+        a2b_key = _derive(session_key, salt, b"p2p-chat a2b")
+        b2a_key = _derive(session_key, salt, b"p2p-chat b2a")
+        self.__send_key, self.__recv_key = (a2b_key, b2a_key) if is_initiator else (b2a_key, a2b_key)
+        self._send, self._recv = AESGCM(self.__send_key), AESGCM(self.__recv_key)
         self._send_seq = 0
         self._recv_seq = 0
         self._lock = threading.Lock()
@@ -171,5 +172,58 @@ class SessionCrypto:
             self._recv_seq = number
         return plain
 
+    def chunk_crypto(self, transfer_id: str, total_chunks: int, sending: bool) -> "ChunkCrypto":
+        """Khoa rieng cho 1 lan truyen file. Ben gui dung sending=True, ben nhan sending=False
+        (hai ben tu dan xuat ra cung mot khoa, khong can trao doi them)."""
+        base = self.__send_key if sending else self.__recv_key
+        file_key = HKDF(algorithm=hashes.SHA256(), length=KEY_SIZE, salt=None,
+                        info=b"p2p-chat file " + transfer_id.encode("utf-8")).derive(base)
+        return ChunkCrypto(file_key, total_chunks)
+
     def __repr__(self) -> str:
         return "<SessionCrypto>"
+
+
+CHUNK_OVERHEAD = TAG_SIZE  # moi chunk chi them 16 byte (tag), khong can gui nonce
+
+
+class ChunkCrypto:
+    """Ma hoa/giai ma tung chunk file bang AES-256-GCM, doc lap thu tu va doc lap luong.
+
+    - Nonce suy ra tu so thu tu chunk, AAD = (index, tong so chunk) nen chunk bi doi cho,
+      bi sua, hoac thuoc file khac deu bi tu choi.
+    - Giai ma duoc theo THU TU BAT KY (phu hop truyen da luong); an toan khi nhieu luong cung goi.
+    - transfer_id phai KHONG TRUNG giua cac lan truyen trong cung phien (UUID). Gui lai mot chunk
+      thi phai gui lai DUNG du lieu cu, khong ma hoa du lieu khac cung so thu tu.
+    """
+
+    def __init__(self, file_key: bytes, total_chunks: int):
+        if len(file_key) != KEY_SIZE:
+            raise ValueError("Khoa file phai dai 32 byte")
+        if total_chunks < 1:
+            raise ValueError("total_chunks phai >= 1")
+        self._aead = AESGCM(file_key)
+        self._total = total_chunks
+
+    @staticmethod
+    def _nonce(index: int) -> bytes:
+        return b"\x00" * 4 + index.to_bytes(8, "big")
+
+    def _aad(self, index: int) -> bytes:
+        return index.to_bytes(8, "big") + self._total.to_bytes(8, "big")
+
+    def encrypt_chunk(self, index: int, data: bytes) -> bytes:
+        if not 0 <= index < self._total:
+            raise ValueError("index ngoai khoang")
+        return self._aead.encrypt(self._nonce(index), bytes(data), self._aad(index))
+
+    def decrypt_chunk(self, index: int, blob: bytes) -> bytes:
+        if not isinstance(index, int) or not 0 <= index < self._total:
+            raise DecryptError("index chunk khong hop le")
+        try:
+            return self._aead.decrypt(self._nonce(index), bytes(blob), self._aad(index))
+        except InvalidTag as exc:
+            raise DecryptError("Giai ma chunk that bai") from exc
+
+    def __repr__(self) -> str:
+        return "<ChunkCrypto>"
