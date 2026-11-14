@@ -1,0 +1,246 @@
+/* ==========================================================================
+   BẢNG ĐỊNH DẠNG GIAO DIỆN QSS CHO ỨNG DỤNG CHAT P2P (TV2 & TV3)
+   ========================================================================== */
+
+QWidget {
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 13px;
+    color: #1e293b;
+}
+
+/* --- KHUNG CHAT CHÍNH & HEADER (TV2) --- */
+#chatBoxContainer {
+    background-color: #f8fafc;
+}
+
+#chatHeader {
+    background-color: #ffffff;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+#chatPeerName {
+    font-size: 15px;
+    font-weight: bold;
+    color: #0f172a;
+}
+
+#chatPeerStatus {
+    font-size: 12px;
+    color: #64748b;
+}
+
+#chatPeerStatus[status="online"] {
+    color: #16a34a;
+    font-weight: 600;
+}
+
+#chatPeerStatus[status="offline"] {
+    color: #dc2626;
+    font-weight: 600;
+}
+
+/* --- VÙNG KÉO THẢ FILE DRAG & DROP (TV3) --- */
+#messageListView {
+    background-color: #f8fafc;
+    border: 2px solid transparent;
+    padding: 8px;
+}
+
+#messageListView[dragActive="true"] {
+    background-color: #eff6ff;
+    border: 2px dashed #2563eb;
+    border-radius: 8px;
+}
+
+#dropZonePanel {
+    background-color: #f1f5f9;
+    border: 2px dashed #94a3b8;
+    border-radius: 10px;
+}
+
+#dropZonePanel[dragActive="true"] {
+    background-color: #dbeafe;
+    border: 2px dashed #2563eb;
+}
+
+#dropZoneLabel {
+    font-size: 14px;
+    font-weight: 600;
+    color: #334155;
+}
+
+/* --- DÒNG TIẾN TRÌNH TRUYỀN FILE & QPROGRESSBAR (TV3) --- */
+#fileRowWidget {
+    background-color: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+}
+
+#fileRowWidget[transferStatus="transferring"] {
+    border-left: 4px solid #2563eb;
+}
+
+#fileRowWidget[transferStatus="completed"] {
+    border-left: 4px solid #16a34a;
+    background-color: #f0fdf4;
+}
+
+#fileRowWidget[transferStatus="failed"] {
+    border-left: 4px solid #dc2626;
+    background-color: #fef2f2;
+}
+
+#fileRowName {
+    font-weight: 600;
+    color: #0f172a;
+}
+
+#fileRowDetail {
+    font-size: 12px;
+    color: #475569;
+}
+
+#fileRowStatus {
+    font-size: 12px;
+    font-weight: bold;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background-color: #e2e8f0;
+    color: #334155;
+}
+
+#fileRowStatus[transferStatus="transferring"] {
+    background-color: #dbeafe;
+    color: #1d4ed8;
+}
+
+#fileRowStatus[transferStatus="completed"] {
+    background-color: #dcfce7;
+    color: #15803d;
+}
+
+#fileRowStatus[transferStatus="failed"] {
+    background-color: #fee2e2;
+    color: #b91c1c;
+}
+
+#fileRowProgressBar {
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    background-color: #f1f5f9;
+    text-align: center;
+    font-size: 11px;
+    font-weight: bold;
+    color: #0f172a;
+}
+
+#fileRowProgressBar::chunk {
+    background-color: #3b82f6;
+    border-radius: 5px;
+}
+
+#fileRowProgressBar[transferStatus="completed"]::chunk {
+    background-color: #22c55e;
+}
+
+#fileRowProgressBar[transferStatus="failed"]::chunk {
+    background-color: #ef4444;
+}
+
+#fileRowCancelBtn {
+    background-color: #fee2e2;
+    color: #b91c1c;
+    border: 1px solid #fecaca;
+    border-radius: 5px;
+    padding: 3px 10px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#fileRowCancelBtn:hover {
+    background-color: #fecaca;
+}
+
+/* --- HỘP THOẠI FORWARD & CONFIG AVATAR (TV3) --- */
+#forwardDialog, #configDialog {
+    background-color: #ffffff;
+}
+
+#dialogSectionLabel {
+    font-weight: 600;
+    color: #1e293b;
+}
+
+#dialogHintLabel {
+    font-size: 12px;
+    color: #64748b;
+}
+
+#forwardPreviewBox {
+    background-color: #f1f5f9;
+    border-left: 4px solid #3b82f6;
+    border-radius: 6px;
+}
+
+#forwardPreviewText {
+    color: #334155;
+    font-style: italic;
+}
+
+#forwardSearchInput, #configInput, #messageInput {
+    background-color: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 6px 10px;
+}
+
+#forwardSearchInput:focus, #configInput:focus, #messageInput:focus {
+    border: 1px solid #2563eb;
+}
+
+#forwardPeerList {
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    background-color: #ffffff;
+    padding: 4px;
+}
+
+#avatarPreviewLabel {
+    background-color: #dbeafe;
+    color: #1d4ed8;
+    font-size: 24px;
+    font-weight: bold;
+    border: 2px solid #93c5fd;
+    border-radius: 34px;
+}
+
+/* --- NÚT BẤM CHUNG --- */
+#primaryButton, #sendButton {
+    background-color: #2563eb;
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
+    padding: 7px 14px;
+    font-weight: 600;
+}
+
+#primaryButton:hover, #sendButton:hover {
+    background-color: #1d4ed8;
+}
+
+#primaryButton:disabled, #sendButton:disabled {
+    background-color: #94a3b8;
+}
+
+#secondaryButton, #attachButton, #emojiButton {
+    background-color: #f1f5f9;
+    color: #334155;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-weight: 600;
+}
+
+#secondaryButton:hover, #attachButton:hover, #emojiButton:hover {
+    background-color: #e2e8f0;
+}
