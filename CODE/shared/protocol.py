@@ -7,6 +7,19 @@ MAX_MESSAGE_SIZE = 1024 * 1024
 HEADER_FIELDS = ("message_id", "message_type", "sender_id", "receiver_id", "timestamp")
 
 
+
+def validate_uuid(value, field_name):
+    """Kiểm tra giá trị là UUID hợp lệ."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} phải là UUID hợp lệ")
+
+    try:
+        uuid.UUID(value)
+    except (ValueError, AttributeError) as exc:
+        raise ValueError(
+            f"{field_name} phải là UUID hợp lệ"
+        ) from exc
+    
 def validate_message(message):
     """Kiểm tra phần chung của message và payload TEXT/EMOJI."""
     if not isinstance(message, dict):
@@ -22,7 +35,7 @@ def validate_message(message):
             raise ValueError(f"Header thiếu hoặc sai {field}")
 
     try:
-        uuid.UUID(header["message_id"])
+        validate_uuid(header["message_id"], "message_id")
         timestamp = datetime.fromisoformat(header["timestamp"])
     except ValueError as exc:
         raise ValueError("message_id hoặc timestamp không hợp lệ") from exc
@@ -50,6 +63,55 @@ def validate_message(message):
         if not action or payload.get("action") != action:
             raise ValueError("payload.action phải khớp với FILE_<ACTION>")
 
+    if message_type == "REPLY":
+        validate_uuid(
+            payload.get("reply_to"),
+            "reply_to"
+        )
+
+        if not isinstance(payload.get("text"), str):
+            raise ValueError("REPLY thiếu hoặc sai text")
+
+        if not payload["text"].strip():
+            raise ValueError("REPLY text không được rỗng")
+
+        if uuid.UUID(payload["reply_to"]) == uuid.UUID(header["message_id"]):
+            raise ValueError(
+                "REPLY không được tham chiếu chính nó"
+            )
+
+    if message_type == "FORWARD":
+        forwarded_from = payload.get("forwarded_from")
+
+        if not isinstance(forwarded_from, str) or not forwarded_from.strip():
+            raise ValueError("FORWARD thiếu forwarded_from")
+
+        validate_uuid(
+            payload.get("original_message_id"),
+            "original_message_id"
+        )
+
+        original_type = payload.get("original_message_type")
+
+        if original_type not in ("TEXT", "EMOJI"):
+            raise ValueError(
+                "FORWARD chỉ hỗ trợ TEXT hoặc EMOJI"
+            )
+
+        original_payload = payload.get("original_payload")
+
+        if not isinstance(original_payload, dict):
+            raise ValueError(
+                "FORWARD original_payload phải là object"
+            )
+
+        required = "text" if original_type == "TEXT" else "emoji"
+
+        if not isinstance(original_payload.get(required), str):
+            raise ValueError(
+                f"FORWARD thiếu hoặc sai original_payload.{required}"
+            )
+
     return None
 
 def create_message(sender_id, receiver_id, message_type, payload):
@@ -75,6 +137,41 @@ def create_text_message(sender_id, receiver_id, text):
         receiver_id,
         "TEXT",
         {"text": text}
+    )
+
+
+def create_reply_message(sender_id, receiver_id, reply_to, text):
+    """Tạo thông điệp trả lời."""
+    return create_message(
+        sender_id,
+        receiver_id,
+        "REPLY",
+        {
+            "reply_to": reply_to,
+            "text": text
+        }
+    )
+
+
+def create_forward_message(
+    sender_id,
+    receiver_id,
+    forwarded_from,
+    original_message_id,
+    original_message_type,
+    original_payload
+):
+    """Tạo thông điệp chuyển tiếp."""
+    return create_message(
+        sender_id,
+        receiver_id,
+        "FORWARD",
+        {
+            "forwarded_from": forwarded_from,
+            "original_message_id": original_message_id,
+            "original_message_type": original_message_type,
+            "original_payload": original_payload.copy()
+        }
     )
 
 
