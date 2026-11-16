@@ -78,6 +78,23 @@ Giữ nguyên quy tắc framing của nhóm (`message_protocol.md`, mục 5): **
 - Đề xuất giới hạn khung 1 MiB (`MAX_FRAME_SIZE`) để tránh cấp phát bộ nhớ quá lớn, đúng yêu cầu mục 5 của giao thức nhóm.
 - Mỗi chunk file là một khối mã hóa riêng. TV truyền file chỉ gọi `encrypt`, không tự quản lý nonce.
 
+### 4.1. Mã hóa từng chunk file
+
+Truyền file đa luồng gửi nhiều chunk song song, nên dùng `ChunkCrypto` thay vì bộ đếm `seq` của `SessionCrypto` (bộ đếm đòi hỏi gói đến đúng thứ tự):
+
+```python
+# Bên gửi (biết total_chunks)                 # Bên nhận (lấy total_chunks, transfer_id từ FILE OFFER)
+cc = session.chunk_crypto(transfer_id, total, sending=True)
+blob = cc.encrypt_chunk(i, data)              cc = session.chunk_crypto(transfer_id, total, sending=False)
+# gửi blob (base64 nếu nằm trong JSON)        data = cc.decrypt_chunk(i, blob)   # DecryptError nếu sai
+```
+
+- Khóa file dẫn xuất từ khóa phiên bằng HKDF theo `transfer_id`, hai bên tự tính ra cùng khóa, không cần trao đổi thêm.
+- Nonce suy ra từ số thứ tự chunk, AAD gồm (số thứ tự, tổng số chunk): chunk bị sửa, đổi chỗ, hoặc thuộc file khác đều bị từ chối. Mỗi chunk chỉ tốn thêm 16 byte (tag).
+- Giải mã theo **thứ tự bất kỳ** và từ **nhiều luồng** đều an toàn. Bên nhận vẫn phải đối chiếu số chunk và kích thước với `FILE OFFER`.
+- `transfer_id` phải duy nhất cho mỗi lần truyền (UUID, đúng quy định của giao thức nhóm). Gửi lại một chunk thì gửi lại đúng dữ liệu cũ.
+- Nếu chunk gửi qua `send_secure` thì khung đã được mã hóa sẵn và không cần mã hóa lần hai. `ChunkCrypto` dùng khi chunk đi riêng, nhiều luồng, hoặc nhiều kết nối.
+
 ## 5. Bộ ghi Log an toàn
 
 Mã nguồn: `CODE/logger.py` (`setup_logging`, `log_event`, `Event`, `mask_ip`). Bắt tay: `CODE/security/handshake.py`.
@@ -194,6 +211,10 @@ Lưu ý khi nhiều luồng cùng gửi: đặt `encrypt` và `sendall` trong **
 | SEC-05 | Bắt tay hai tiến trình trên 1 máy | Hai bên có cùng khóa phiên |
 | SEC-06 | Chạy toàn bộ luồng rồi tìm trong `logs/` chuỗi `BEGIN`, khóa, nội dung tin | Không tìm thấy |
 | SEC-07 | Bên nhận không gửi `KEY_CONFIRM` | Hết hạn, đóng kết nối, log `HANDSHAKE_FAIL` |
+| SEC-08 | Mã hóa chunk, giải mã theo thứ tự xáo trộn | Ghép lại đúng file |
+| SEC-09 | Sửa 1 byte chunk, đổi chỗ index, sai tổng số chunk, sai `transfer_id` | `DecryptError` |
+| SEC-10 | 4 cặp peer (8 tiến trình) cùng chạy: bắt tay, 10 emoji, avatar PNG chia chunk 4 luồng | Tất cả khớp, khóa mỗi tiến trình khác nhau |
+| SEC-11 | Quét log của cả 8 tiến trình | Không có khóa, chuỗi mã hóa, nội dung tin |
 
 ## 10. Checklist Chặng 1 (01/11 – 03/11/2026)
 
