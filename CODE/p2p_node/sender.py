@@ -3,7 +3,6 @@ import base64
 import hashlib
 import os
 import socket
-import time
 import uuid
 
 from shared.protocol import (
