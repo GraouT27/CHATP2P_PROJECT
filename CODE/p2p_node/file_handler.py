@@ -7,7 +7,6 @@ from shared.protocol import create_message
 
 
 class FileMessageCallbacks:
-    """Đăng ký và xử lý các message truyền file."""
 
     def __init__(self, storage, local_peer_id, remote_peer_id):
         self.storage = storage
@@ -33,6 +32,11 @@ class FileMessageCallbacks:
         self.message_handler.register(
             "FILE_END",
             self._handle_file_end
+        )
+
+        self.message_handler.register(
+            "FILE_CANCEL",
+            self._handle_file_cancel
         )
 
     def _send_message(self, message_type, payload, send_reply):
@@ -132,15 +136,32 @@ class FileMessageCallbacks:
             self.active_transfers.discard(transfer_id)
             self._send_error(transfer_id, exc, send_reply)
 
+    def _handle_file_cancel(self, message, send_reply):
+        payload = message["payload"]
+        transfer_id = payload.get("transfer_id")
+
+        try:
+            if payload.get("action") != "CANCEL":
+                raise ValueError("Action FILE_CANCEL không hợp lệ")
+
+            if not transfer_id:
+                raise ValueError("Thiếu transfer_id")
+
+            self.storage.abort_file(transfer_id)
+
+        except Exception as exc:
+            self._send_error(transfer_id, exc, send_reply)
+
+        finally:
+            self.active_transfers.discard(transfer_id)
+
     def handle_message(self, message, send_reply):
-        """Chuyển message cho MessageHandler của TV4."""
         self.message_handler.handle_message(
             message,
             send_reply
         )
 
     def close(self):
-        """Xóa các file tạm thuộc kết nối này."""
         for transfer_id in list(self.active_transfers):
             self.storage.abort_file(transfer_id)
 

@@ -35,8 +35,8 @@ class TransferManager:
         return TCPSender(
             sender_id=self.sender_id,
             receiver_id=receiver_id,
-            host=peer["ip"],
-            port=peer["tcp_port"],
+            ip=peer["ip"],
+            tcp_port=peer["tcp_port"],
         )
 
     def send_file(self, receiver_id, file_path, progress_callback=None):
