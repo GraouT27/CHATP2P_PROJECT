@@ -307,3 +307,104 @@ class TCPSender:
 
         except Exception:
             raise
+
+
+# ===================== GUI P2P DIRECT & PERSISTENT SENDER =====================
+
+from typing import Tuple
+from config import CONNECT_TIMEOUT, SOCKET_TIMEOUT
+from shared.protocol import pack_message
+from security.logger import log
+
+
+def send_message_direct(ip: str, port: int, header: dict, payload: bytes = b"") -> Tuple[bool, str]:
+    """
+    Kết nối TCP tới Peer đích, gửi gói tin có framing và đóng kết nối (dành cho control packets).
+    Trả về (thành_công, thông_báo_lỗi).
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(CONNECT_TIMEOUT)
+
+    try:
+        sock.connect((ip, port))
+        sock.settimeout(SOCKET_TIMEOUT)
+        data = pack_message(header, payload)
+        sock.sendall(data)
+        return True, "OK"
+    except (socket.timeout, TimeoutError):
+        err = f"Hết thời gian chờ kết nối tới {ip}:{port}"
+        log.warning(err)
+        return False, err
+    except ConnectionRefusedError:
+        err = f"Peer tại {ip}:{port} từ chối kết nối (chưa mở hoặc đã tắt)"
+        log.warning(err)
+        return False, err
+    except (ConnectionResetError, BrokenPipeError):
+        err = f"Mất kết nối đột ngột với {ip}:{port}"
+        log.error(err)
+        return False, err
+    except Exception as e:
+        err = f"Lỗi không xác định khi gửi tới {ip}:{port}: {e}"
+        log.error(err)
+        return False, err
+    finally:
+        try:
+            sock.close()
+        except Exception:
+            pass
+
+
+class PeerSocketClient:
+    """
+    Giữ kết nối TCP lâu dài (Persistent Socket) tới một Peer để gửi streaming tin nhắn/chunks.
+    """
+    def __init__(self, ip: str, port: int):
+        self.ip = ip
+        self.port = port
+        self.peer_id = f"{ip}:{port}"
+        self.sock: socket.socket = None
+        self.is_connected = False
+
+    def connect(self) -> bool:
+        """Mở kết nối TCP tới Peer."""
+        if self.is_connected and self.sock:
+            return True
+
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.settimeout(CONNECT_TIMEOUT)
+        try:
+            self.sock.connect((self.ip, self.port))
+            self.sock.settimeout(SOCKET_TIMEOUT)
+            self.is_connected = True
+            log.info(f"Đã mở kết nối TCP thành công tới {self.peer_id}")
+            return True
+        except Exception as e:
+            log.error(f"Không thể kết nối tới {self.peer_id}: {e}")
+            self.close()
+            return False
+
+    def send(self, header: dict, payload: bytes = b"") -> bool:
+        """Gửi gói tin qua socket hiện hành."""
+        if not self.is_connected or not self.sock:
+            if not self.connect():
+                return False
+
+        try:
+            data = pack_message(header, payload)
+            self.sock.sendall(data)
+            return True
+        except Exception as e:
+            log.error(f"Lỗi khi gửi dữ liệu tới {self.peer_id}: {e}")
+            self.close()
+            return False
+
+    def close(self):
+        """Đóng kết nối an toàn."""
+        self.is_connected = False
+        if self.sock:
+            try:
+                self.sock.close()
+            except Exception:
+                pass
+            self.sock = None
+
