@@ -1,92 +1,79 @@
+"""
+Transfer Task Module - Đối tượng quản lý trạng thái tác vụ truyền nhận file (TV5).
+"""
 
-import threading
-import uuid
+import os
 from enum import Enum
+from p2p_node.speed_meter import SpeedMeter
+from shared.format import format_bytes, format_speed
+
+
+class TransferDirection(Enum):
+    UPLOAD = "upload"
+    DOWNLOAD = "download"
 
 
 class TransferStatus(Enum):
-    PENDING = "PENDING"
-    RUNNING = "RUNNING"
-    COMPLETED = "COMPLETED"
-    FAILED = "FAILED"
-    CANCELLED = "CANCELLED"
+    PENDING = "pending"
+    TRANSFERRING = "transferring"
+    COMPLETED = "completed"
+    ERROR = "error"
+    CANCELLED = "cancelled"
 
 
 class TransferTask:
-    """Lưu trạng thái của một lần truyền file."""
+    """Quản lý trạng thái và tiến độ của 1 phiên gửi hoặc nhận file."""
 
-    def __init__(self, sender_id, receiver_id, file_path):
-        self.transfer_id = str(uuid.uuid4())
-
-        self.sender_id = sender_id
-        self.receiver_id = receiver_id
+    def __init__(self, task_id: str, peer_id: str, direction: TransferDirection,
+                 file_path: str = "", file_name: str = "", file_size: int = 0,
+                 total_chunks: int = 0, file_hash: str = ""):
+        self.task_id = task_id
+        self.peer_id = peer_id
+        self.direction = direction
         self.file_path = file_path
+        self.file_name = file_name or os.path.basename(file_path)
+        self.file_size = file_size or (os.path.getsize(file_path) if os.path.exists(file_path) else 0)
+        self.total_chunks = total_chunks
+        self.current_chunk = 0
+        self.file_hash = file_hash
 
+        self.transferred_bytes = 0
         self.status = TransferStatus.PENDING
-        self.progress = 0.0
-        self.speed = 0.0
-        self.error = None
+        self.error_msg = ""
+        self.speed_meter = SpeedMeter()
+        self.temp_path = ""
+        self.final_path = ""
+        self.is_aborted = False
 
-        self.cancel_event = threading.Event()
-        self._lock = threading.Lock()
+    @property
+    def progress_percent(self) -> float:
+        """Tính % tiến độ hoàn thành."""
+        if self.file_size <= 0:
+            return 100.0 if self.status == TransferStatus.COMPLETED else 0.0
+        return min(100.0, (self.transferred_bytes / self.file_size) * 100)
 
-    def start(self):
-        with self._lock:
-            if self.status != TransferStatus.PENDING:
-                return False
+    @property
+    def speed_str(self) -> str:
+        """Lấy chuỗi tốc độ tức thời."""
+        if self.status != TransferStatus.TRANSFERRING:
+            return ""
+        return self.speed_meter.get_speed_str()
 
-            self.status = TransferStatus.RUNNING
-            return True
+    @property
+    def size_str(self) -> str:
+        """Chuỗi hiển thị tiến độ dung lượng: ví dụ '4.2 MB / 10.0 MB'."""
+        cur = format_bytes(self.transferred_bytes)
+        tot = format_bytes(self.file_size)
+        return f"{cur} / {tot}"
 
-    def update_progress(self, progress, speed):
-        with self._lock:
-            if self.status != TransferStatus.RUNNING:
-                return
+    def update_progress(self, added_bytes: int):
+        """Cập nhật tiến độ sau khi gửi/nhận thêm một số bytes."""
+        self.transferred_bytes += added_bytes
+        self.speed_meter.add_bytes(added_bytes)
+        self.status = TransferStatus.TRANSFERRING
 
-            self.progress = max(0.0, min(100.0, float(progress)))
-            self.speed = max(0.0, float(speed))
-
-    def complete(self):
-        with self._lock:
-            if self.status == TransferStatus.CANCELLED:
-                return
-
-            self.progress = 100.0
-            self.status = TransferStatus.COMPLETED
-
-    def fail(self, error):
-        with self._lock:
-            if self.status == TransferStatus.CANCELLED:
-                return
-
-            self.error = str(error)
-            self.status = TransferStatus.FAILED
-
-    def cancel(self):
-        with self._lock:
-            if self.status in (
-                TransferStatus.COMPLETED,
-                TransferStatus.FAILED,
-                TransferStatus.CANCELLED
-            ):
-                return False
-
-            self.cancel_event.set()
-            self.status = TransferStatus.CANCELLED
-            return True
-
-    def is_cancelled(self):
-        return self.cancel_event.is_set()
-
-    def get_info(self):
-        with self._lock:
-            return {
-                "transfer_id": self.transfer_id,
-                "sender_id": self.sender_id,
-                "receiver_id": self.receiver_id,
-                "file_path": self.file_path,
-                "status": self.status.value,
-                "progress": self.progress,
-                "speed": self.speed,
-                "error": self.error
-            }
+    def abort(self, reason: str = "Đã hủy"):
+        """Đánh dấu hủy tác vụ."""
+        self.is_aborted = True
+        self.status = TransferStatus.CANCELLED
+        self.error_msg = reason
