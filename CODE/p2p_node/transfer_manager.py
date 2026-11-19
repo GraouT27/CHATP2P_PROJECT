@@ -174,6 +174,11 @@ class TransferManager(QObject):
             peer_id=peer_id,
             direction=TransferDirection.UPLOAD,
             file_path=file_path,
+        return TCPSender(
+            sender_id=self.sender_id,
+            receiver_id=receiver_id,
+            ip=peer["ip"],
+            tcp_port=peer["tcp_port"],
         )
         self.tasks[task_id] = task
         self.task_added.emit(task)

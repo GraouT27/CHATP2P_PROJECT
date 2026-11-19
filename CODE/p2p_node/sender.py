@@ -3,16 +3,19 @@ import base64
 import hashlib
 import os
 import socket
+import threading
 import uuid
 
-from shared.protocol import (
-    create_message,
-    create_text_message,
-    encode_message,
-    recv_message
+from shared.protocol import create_message, create_text_message
+from p2p_node.speed_meter import SpeedMeter
+
+from security.handshake import (
+    handshake_initiator,
+    send_secure,
+    recv_secure
 )
 
-from p2p_node.speed_meter import SpeedMeter
+from security.crypto import KeyPair
 
 
 CHUNK_SIZE = 48 * 1024
@@ -20,42 +23,103 @@ SOCKET_TIMEOUT = 30
 
 
 class TCPSender:
-    """Gửi text và file đến một peer qua TCP."""
-
-    def __init__(self, sender_id, receiver_id, ip, tcp_port):
+    def __init__(
+        self,
+        sender_id,
+        receiver_id,
+        ip,
+        tcp_port,
+        keypair
+    ):
         self.sender_id = sender_id
         self.receiver_id = receiver_id
         self.ip = ip
         self.tcp_port = tcp_port
+        self.keypair = keypair
 
         self.sock = None
+        self.session = None
+        self.peer_fingerprint = None
+
         self.speed_meter = SpeedMeter()
 
-    def connect(self):
-        if self.sock is not None:
-            return
+        self._send_lock = threading.Lock()
+        self._connect_lock = threading.Lock()
+        self._receive_lock = threading.Lock()
 
-        self.sock = socket.create_connection(
-            (self.ip, self.tcp_port),
-            timeout=SOCKET_TIMEOUT
-        )
-        self.sock.settimeout(SOCKET_TIMEOUT)
+    def connect(self):
+        with self._connect_lock:
+            if self.sock is not None and self.session is not None:
+                return
+
+            self.sock = socket.create_connection(
+                (self.ip, self.tcp_port),
+                timeout=SOCKET_TIMEOUT
+            )
+
+            try:
+                result = handshake_initiator(
+                    self.sock,
+                    self.keypair,
+                    self.sender_id,
+                    self.receiver_id
+                )
+
+                self.session = result.session
+                self.peer_fingerprint = result.peer_fingerprint
+
+                print(
+                    f"[SENDER] Đã kết nối với {result.peer_id}"
+                )
+
+                print(
+                    f"[SENDER] Fingerprint: {self.peer_fingerprint}"
+                )
+
+                self.sock.settimeout(SOCKET_TIMEOUT)
+
+            except Exception:
+                self.sock.close()
+                self.sock = None
+                self.session = None
+                raise
 
     def close(self):
-        if self.sock is not None:
-            try:
-                self.sock.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
+        with self._connect_lock:
+            if self.sock is not None:
+                try:
+                    self.sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
 
-            self.sock.close()
+                try:
+                    self.sock.close()
+                except OSError:
+                    pass
+
             self.sock = None
+            self.session = None
 
     def _send_message(self, message):
-        if self.sock is None:
+        if self.sock is None or self.session is None:
             raise ConnectionError("Chưa kết nối đến peer")
 
-        self.sock.sendall(encode_message(message))
+        with self._send_lock:
+            send_secure(
+                self.sock,
+                self.session,
+                message
+            )
+
+    def _recv_message(self):
+        if self.sock is None or self.session is None:
+            raise ConnectionError("Chưa kết nối đến peer")
+
+        with self._receive_lock:
+            return recv_secure(
+                self.sock,
+                self.session
+            )
 
     def send_text(self, text):
         self.connect()
@@ -83,9 +147,23 @@ class TCPSender:
 
         return digest.hexdigest()
 
-    def _check_cancelled(self, cancel_event):
+    @staticmethod
+    def _check_cancelled(cancel_event):
         if cancel_event is not None and cancel_event.is_set():
             raise InterruptedError("Tác vụ truyền file đã bị hủy")
+
+    def _send_cancel(self, transfer_id):
+        message = create_message(
+            self.sender_id,
+            self.receiver_id,
+            "FILE_CANCEL",
+            {
+                "action": "CANCEL",
+                "transfer_id": transfer_id
+            }
+        )
+
+        self._send_message(message)
 
     def send_file(
         self,
@@ -106,25 +184,30 @@ class TCPSender:
 
         self.speed_meter.start()
 
-        start_message = create_message(
-            self.sender_id,
-            self.receiver_id,
-            "FILE_START",
-            {
-                "action": "START",
-                "transfer_id": transfer_id,
-                "file_name": file_name,
-                "file_size": file_size,
-                "sha256": sha256
-            }
-        )
-
-        self._send_message(start_message)
-
-        sent_size = 0
-        chunk_index = 0
+        started = False
 
         try:
+            self._check_cancelled(cancel_event)
+
+            start_message = create_message(
+                self.sender_id,
+                self.receiver_id,
+                "FILE_START",
+                {
+                    "action": "START",
+                    "transfer_id": transfer_id,
+                    "file_name": file_name,
+                    "file_size": file_size,
+                    "sha256": sha256
+                }
+            )
+
+            self._send_message(start_message)
+            started = True
+
+            sent_size = 0
+            chunk_index = 0
+
             with open(file_path, "rb") as file:
                 while True:
                     self._check_cancelled(cancel_event)
@@ -180,8 +263,7 @@ class TCPSender:
 
             self._send_message(end_message)
 
-            # Chờ bên nhận xác nhận lưu file.
-            response = recv_message(self.sock)
+            response = self._recv_message()
 
             response_type = response["header"]["message_type"]
             response_payload = response["payload"]
@@ -191,7 +273,10 @@ class TCPSender:
 
             if response_type == "FILE_ERROR":
                 raise RuntimeError(
-                    response_payload.get("error", "Bên nhận báo lỗi")
+                    response_payload.get(
+                        "error",
+                        "Bên nhận báo lỗi"
+                    )
                 )
 
             if response_type != "FILE_ACK":
@@ -210,6 +295,15 @@ class TCPSender:
                 )
 
             return transfer_id
+
+        except InterruptedError:
+            if started:
+                try:
+                    self._send_cancel(transfer_id)
+                except (OSError, ConnectionError, CryptoError):
+                    pass
+
+            raise
 
         except Exception:
             raise
