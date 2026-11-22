@@ -59,7 +59,11 @@ class MainWindow(QMainWindow):
         qss_path = os.path.join(os.path.dirname(__file__), "styles.qss")
         if os.path.exists(qss_path):
             with open(qss_path, "r", encoding="utf-8") as f:
-                self.setStyleSheet(f.read())
+                qss_data = f.read()
+                self.setStyleSheet(qss_data)
+                app_inst = QApplication.instance()
+                if app_inst:
+                    app_inst.setStyleSheet(qss_data)
 
         # 1. Khởi tạo Core Cryptography & File Manager
         self.crypto_mgr = CryptoManager()
