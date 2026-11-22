@@ -224,3 +224,4 @@ __pycache__/
 *.py[cod]
 .vs/
 .pytest_cache/
+config.json

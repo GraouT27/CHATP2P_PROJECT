@@ -7,6 +7,7 @@ from .crypto import (  # noqa: F401
     DecryptError,
     KeyPair,
     ReplayError,
+    SecretBytes,
     SessionCrypto,
     encrypt_session_key,
     fingerprint_of_pem,
