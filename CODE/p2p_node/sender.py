@@ -3,6 +3,7 @@ import base64
 import hashlib
 import os
 import socket
+import struct
 import threading
 import uuid
 

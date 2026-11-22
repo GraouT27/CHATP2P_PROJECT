@@ -58,6 +58,8 @@ class FileRowWidget(QFrame):
 
     def update_task(self, task: TransferTask):
         """Cập nhật dữ liệu hiển thị từ TransferTask."""
+        if not task:
+            return
         self.progress_bar.setValue(int(task.progress_percent))
         self.size_label.setText(f"{task.size_str} ({task.progress_percent:.1f}%)")
         self.speed_label.setText(task.speed_str)

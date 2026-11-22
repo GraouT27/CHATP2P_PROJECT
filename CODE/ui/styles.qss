@@ -9,6 +9,69 @@ QWidget {
     font-size: 13px;
 }
 
+/* ========================== DIALOGS ========================== */
+QDialog {
+    background-color: #f8f9fa;
+    color: #000000;
+}
+
+QDialog QLabel {
+    color: #000000;
+}
+
+/* ========================== MENUS ========================== */
+QMenuBar {
+    background-color: #1e1e2e;
+    color: #ffffff;
+    font-size: 13px;
+    padding: 2px;
+}
+
+QMenuBar::item {
+    background-color: transparent;
+    color: #ffffff;
+    padding: 4px 10px;
+    border-radius: 4px;
+}
+
+QMenuBar::item:selected {
+    background-color: #2d2d44;
+    color: #ffffff;
+}
+
+QMenu {
+    background-color: #ffffff;
+    color: #000000;
+    border: 1px solid #ced4da;
+    border-radius: 8px;
+    padding: 4px 0px;
+}
+
+QMenu::item {
+    background-color: transparent;
+    color: #000000;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 7px 24px 7px 14px;
+    margin: 2px 4px;
+    border-radius: 6px;
+}
+
+QMenu::item:selected {
+    background-color: #e8f0fe;
+    color: #1a73e8;
+}
+
+QMenu::item:disabled {
+    color: #adb5bd;
+}
+
+QMenu::separator {
+    height: 1px;
+    background-color: #e9ecef;
+    margin: 4px 8px;
+}
+
 /* ========================== PEER LIST ========================== */
 #peerListContainer {
     background-color: #2d2d44;
@@ -237,10 +300,10 @@ QProgressBar::chunk {
 
 /* ========================== EMOJI PICKER ========================== */
 #emojiPicker {
-    background-color: #2d2d44;
-    border: 1px solid #4a4a66;
-    border-radius: 10px;
-    padding: 6px;
+    background-color: #1e222b;
+    border: 1px solid #2d3340;
+    border-radius: 12px;
+    padding: 0px;
 }
 
 #emojiPicker QPushButton {
@@ -248,11 +311,11 @@ QProgressBar::chunk {
     border: none;
     border-radius: 6px;
     font-size: 18px;
-    padding: 3px;
+    padding: 2px;
 }
 
 #emojiPicker QPushButton:hover {
-    background-color: #4a4a70;
+    background-color: rgba(255, 255, 255, 0.08);
 }
 
 /* ========================== SCROLLBAR ========================== */

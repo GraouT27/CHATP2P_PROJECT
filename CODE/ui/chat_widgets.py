@@ -158,74 +158,353 @@ class ReplyPreview(QFrame):
 # ========================== EMOJI PICKER ==========================
 
 class EmojiPicker(QWidget):
-    """Widget bảng chọn biểu tượng cảm xúc dạng lưới Popup."""
+    """Widget bảng chọn biểu tượng cảm xúc giao diện Dark Slate hiện đại chuẩn Zalo/Discord."""
     emoji_selected = pyqtSignal(str)
 
     EMOJI_CATEGORIES = {
-        "😀 Mặt cười": [
+        "Cảm xúc": [
             "😀", "😃", "😄", "😁", "😆", "😅", "🤣", "😂",
-            "🙂", "😉", "😊", "😇", "🥰", "😍", "🤩", "😘",
-            "😗", "😚", "😙", "🥲", "😋", "😛", "😜", "🤪",
-            "😝", "🤑", "🤗", "🤭", "🤫", "🤔", "🫡", "🤐",
+            "🙂", "🙃", "😉", "😊", "😇", "🥰", "😍", "🤩",
+            "😘", "😗", "😚", "😙", "🥲", "😋", "😛", "😜",
+            "🤪", "😝", "🤑", "🤗", "🤭", "🤫", "🤔", "🫡",
+            "🤐", "🤨", "😐", "😑", "😶", "🫥", "😏", "😒",
+            "🙄", "😬", "🤥", "😌", "😔", "😪", "🤤", "😴",
+            "😷", "🤒", "🤕", "🤢", "🤮", "🤧", "🥵", "🥶",
+            "🥴", "😵", "🤯", "🤠", "🥳", "🥸", "😎", "🤓",
+            "🧐", "😕", "🫤", "😟", "🙁", "☹️", "😮", "😯",
+            "😲", "😳", "🥺", "🥹", "😦", "😧", "😨", "😰",
+            "😥", "😢", "😭", "😱", "😖", "😣", "😞", "😓",
+            "😩", "😫", "🥱", "😤", "😡", "😠", "🤬", "😈",
         ],
-        "😢 Cảm xúc": [
-            "😮", "🤯", "😱", "🥵", "🥶", "😰", "😨", "😧",
-            "😦", "😯", "😲", "🥺", "😢", "😥", "😭", "😤",
-            "😠", "😡", "🤬", "😈", "👿", "💀", "☠️", "💩",
-            "🤡", "👻", "👽", "🤖", "🙈", "🙉", "🙊", "💤",
-        ],
-        "👍 Cử chỉ": [
+        "Cử chỉ": [
             "👋", "🤚", "🖐️", "✋", "🖖", "👌", "🤌", "🤏",
             "✌️", "🤞", "🫰", "🤟", "🤘", "🤙", "👈", "👉",
             "👆", "🖕", "👇", "☝️", "🫵", "👍", "👎", "✊",
-            "👊", "🤛", "🤜", "👏", "🙌", "🫶", "🙏", "🤝",
+            "👊", "🤛", "🤜", "👏", "🙌", "🫶", "👐", "🤲",
+            "🤝", "🙏", "✍️", "💅", "🤳", "💪", "🦾", "🦿",
+            "🦵", "🦶", "👂", "🦻", "👃", "🫀", "🫁", "🧠",
+            "🦷", "🦴", "👀", "👁️", "👅", "👄", "🫦", "👶",
         ],
-        "❤️ Biểu tượng": [
+        "Biểu tượng": [
             "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍",
-            "💔", "❤️‍🔥", "💕", "💞", "💓", "💗", "💖", "💘",
-            "🔥", "💯", "🎉", "🎊", "🏆", "🥇", "⭐", "✨",
-            "🌟", "💡", "🎯", "🚀", "⚡", "🎁", "🎈", "🔒",
+            "🤎", "💔", "❤️‍🔥", "❤️‍🩹", "💕", "💞", "💓", "💗",
+            "💖", "💘", "💝", "💟", "🔥", "💯", "🎉", "🎊",
+            "🏆", "🥇", "⭐", "✨", "🌟", "💡", "🎯", "🚀",
+            "⚡", "🎁", "🎈", "🔒", "🔑", "💎", "💰", "💵",
+            "🔔", "🎵", "🎶", "💤", "💥", "💫", "💢", "♨️",
+        ],
+        "Đồ ăn": [
+            "🍏", "🍎", "🍐", "🍊", "🍋", "🍌", "🍉", "🍇",
+            "🍓", "🫐", "🍈", "🍒", "🍑", "🥭", "🍍", "🥥",
+            "🥝", "🍅", "🥑", "🥦", "🥕", "🌽", "🌶️", "🍞",
+            "🥐", "🥖", "🧀", "🍳", "🥞", "🧇", "🥓", "🥩",
+            "🍗", "🍔", "🍟", "🍕", "🥪", "🌮", "🍜", "🍣",
+            "🍱", "🥟", "🍤", "🍙", "🍚", "🍦", "🍰", "☕",
+        ],
+        "Hoạt động": [
+            "⚽", "🏀", "🏈", "⚾", "🎾", "🏐", "🏉", "🥏",
+            "🎱", "🏓", "🏸", "🏒", "🏏", "⛳", "🏹", "🎣",
+            "🥊", "🥋", "🛹", "🛼", "⛷️", "🏂", "🏋️", "🤸",
+            "⛹️", "🚴", "🧗", "🏇", "🏆", "🥇", "🥈", "🥉",
+            "🏅", "🎖️", "🎪", "🎭", "🎨", "🎬", "🎤", "🎧",
+            "🎼", "🎹", "🥁", "🎷", "🎺", "🎸", "🎲", "🎮",
+        ],
+        "Du lịch": [
+            "🚗", "🚕", "🚙", "🚌", "🚎", "🏎️", "🚓", "🚑",
+            "🚒", "🚐", "🚚", "🚜", "🛴", "🚲", "🛵", "🏍️",
+            "🚨", "🚔", "✈️", "🛫", "🛬", "🚀", "🛸", "🚁",
+            "🛶", "⛵", "🛳️", "⛴️", "🚢", "⚓", "⛽", "🗺️",
+            "🗽", "🗼", "🏰", "🏟️", "🏖️", "🏝️", "🌋", "🏔️",
+            "🏕️", "🏠", "🏡", "🏢", "🏬", "🏥", "🏦", "🏨",
+        ],
+        "Đồ vật": [
+            "💡", "🔦", "🏮", "🧱", "🧰", "🔨", "🛠️", "⛏️",
+            "⚙️", "💣", "🔪", "🗡️", "⚔️", "🛡️", "🔮", "🧿",
+            "💈", "🔭", "🔬", "💊", "💉", "🩸", "🪙", "💰",
+            "💳", "💎", "⚖️", "🔑", "🗝️", "🔒", "🔓", "📦",
+            "🏷️", "✉️", "📧", "📱", "💻", "🖥️", "🖨️", "📷",
+            "📺", "📻", "⏰", "⏳", "📡", "🔋", "🔌", "🕯️",
         ],
     }
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("emojiPicker")
-        self.setWindowFlags(Qt.WindowType.Popup)
-        self.setFixedSize(320, 280)
+        self.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        self.setFixedSize(350, 440)
+        self._recent_emojis = ["👉", "👌", "👀", "👈", "😇", "😭", "😚", "😋", "😡", "🤔", "🤤", "🔥"]
+        self._current_category = "Cảm xúc"
+        self._cat_nav_buttons: dict[str, QPushButton] = {}
         self._setup_ui()
 
     def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(4)
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
 
+        # Style chung cho Widget Popup
+        self.setStyleSheet("""
+            QWidget#emojiPicker {
+                background-color: #1e222b;
+                border: 1px solid #2d3340;
+                border-radius: 12px;
+            }
+            QLabel {
+                color: #8c93a4;
+                font-family: 'Segoe UI', 'Arial', sans-serif;
+            }
+            QScrollArea {
+                background-color: transparent;
+                border: none;
+            }
+            QScrollBar:vertical {
+                background-color: transparent;
+                width: 6px;
+                margin: 4px 2px 4px 0px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #383f4f;
+                border-radius: 3px;
+                min-height: 24px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #4e576d;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+        """)
+
+        # 1. Thanh Tab trên cùng (STICKER | EMOJI | GIF | Expand)
+        top_bar = QWidget()
+        top_bar.setObjectName("emojiTopBar")
+        top_bar.setStyleSheet("""
+            QWidget#emojiTopBar {
+                background-color: #1e222b;
+                border-top-left-radius: 12px;
+                border-top-right-radius: 12px;
+                border-bottom: 1px solid #282d38;
+                padding: 4px 8px;
+            }
+        """)
+        tb_layout = QHBoxLayout(top_bar)
+        tb_layout.setContentsMargins(8, 6, 8, 4)
+        tb_layout.setSpacing(8)
+
+        tab_sticker = QPushButton("STICKER")
+        tab_sticker.setStyleSheet("background: transparent; border: none; color: #7c8495; font-size: 13px; font-weight: bold; padding: 4px 6px;")
+        tb_layout.addWidget(tab_sticker)
+
+        tab_emoji = QPushButton("EMOJI")
+        tab_emoji.setStyleSheet("background: transparent; border: none; border-bottom: 2px solid #3b82f6; color: #3b82f6; font-size: 13px; font-weight: bold; padding: 4px 6px;")
+        tb_layout.addWidget(tab_emoji)
+
+        tab_gif = QPushButton("GIF")
+        tab_gif.setStyleSheet("background: transparent; border: none; color: #7c8495; font-size: 13px; font-weight: bold; padding: 4px 6px;")
+        tb_layout.addWidget(tab_gif)
+
+        tb_layout.addStretch()
+
+        btn_expand = QPushButton("⤢")
+        btn_expand.setStyleSheet("background: transparent; border: none; color: #7c8495; font-size: 15px; font-weight: bold; padding: 2px 6px;")
+        btn_expand.clicked.connect(self.hide)
+        tb_layout.addWidget(btn_expand)
+
+        root_layout.addWidget(top_bar)
+
+        # Ẩn QComboBox nhưng vẫn giữ đối tượng để tương thích 100% với các test case hiện tại
         self.category_combo = QComboBox()
         for cat in self.EMOJI_CATEGORIES:
             self.category_combo.addItem(cat)
         self.category_combo.currentIndexChanged.connect(self._on_category_changed)
-        layout.addWidget(self.category_combo)
+        self.category_combo.setVisible(False)
+        root_layout.addWidget(self.category_combo)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("QScrollArea { border: none; }")
+        # 2. Vùng cuộn chứa nội dung (Gần đây + Danh mục đang chọn)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        self.container = QWidget()
-        self.grid = QGridLayout(self.container)
-        self.grid.setSpacing(2)
+        content_container = QWidget()
+        content_container.setStyleSheet("background: transparent;")
+        self.content_layout = QVBoxLayout(content_container)
+        self.content_layout.setContentsMargins(10, 8, 10, 8)
+        self.content_layout.setSpacing(8)
+
+        # Phần "Gần đây"
+        lbl_recent = QLabel("Gần đây")
+        lbl_recent.setStyleSheet("color: #8c93a4; font-size: 12px; font-weight: bold; padding-left: 2px;")
+        self.content_layout.addWidget(lbl_recent)
+
+        self.recent_container = QWidget()
+        self.recent_container.setStyleSheet("background: transparent;")
+        self.recent_grid = QGridLayout(self.recent_container)
+        self.recent_grid.setContentsMargins(0, 0, 0, 0)
+        self.recent_grid.setSpacing(2)
+        self.content_layout.addWidget(self.recent_container)
+        self._render_recent_grid()
+
+        # Phần "Cảm xúc" (hoặc danh mục hiện tại)
+        self.category_label = QLabel("Cảm xúc")
+        self.category_label.setStyleSheet("color: #8c93a4; font-size: 12px; font-weight: bold; padding-left: 2px; margin-top: 6px;")
+        self.content_layout.addWidget(self.category_label)
+
+        self.category_container = QWidget()
+        self.category_container.setStyleSheet("background: transparent;")
+        self.grid = QGridLayout(self.category_container)
         self.grid.setContentsMargins(0, 0, 0, 0)
-        scroll.setWidget(self.container)
-        layout.addWidget(scroll)
+        self.grid.setSpacing(2)
+        self.content_layout.addWidget(self.category_container)
 
-        self._load_category(list(self.EMOJI_CATEGORIES.values())[0])
+        self.content_layout.addStretch()
+
+        self.scroll.setWidget(content_container)
+        root_layout.addWidget(self.scroll, 1)
+
+        # 3. Thanh điều hướng biểu tượng danh mục ở dưới cùng (Sticky Bottom Bar)
+        bottom_bar = QFrame()
+        bottom_bar.setObjectName("emojiBottomBar")
+        bottom_bar.setStyleSheet("""
+            QFrame#emojiBottomBar {
+                background-color: #171a21;
+                border-top: 1px solid #282d38;
+                border-bottom-left-radius: 12px;
+                border-bottom-right-radius: 12px;
+                padding: 4px 6px;
+            }
+        """)
+        bb_layout = QHBoxLayout(bottom_bar)
+        bb_layout.setContentsMargins(4, 3, 4, 3)
+        bb_layout.setSpacing(4)
+
+        cat_nav_items = [
+            ("🕒", "recent", "Gần đây"),
+            ("😃", "Cảm xúc", "Cảm xúc"),
+            ("👍", "Cử chỉ", "Cử chỉ"),
+            ("❤️", "Biểu tượng", "Biểu tượng"),
+            ("🍔", "Đồ ăn", "Đồ ăn"),
+            ("⚽", "Hoạt động", "Hoạt động"),
+            ("✈️", "Du lịch", "Du lịch"),
+            ("💡", "Đồ vật", "Đồ vật"),
+        ]
+
+        for icon, target, tooltip in cat_nav_items:
+            btn = QPushButton(icon)
+            btn.setToolTip(tooltip)
+            btn.setFixedSize(30, 30)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda _, t=target: self._on_nav_clicked(t))
+            self._cat_nav_buttons[target] = btn
+            bb_layout.addWidget(btn)
+
+        btn_next = QPushButton("❯")
+        btn_next.setFixedSize(24, 30)
+        btn_next.setStyleSheet("background: transparent; border: none; color: #7c8495; font-size: 13px;")
+        btn_next.clicked.connect(self._on_next_category)
+        bb_layout.addWidget(btn_next)
+
+        root_layout.addWidget(bottom_bar)
+
+        # Nạp dữ liệu ban đầu
+        first_cat = list(self.EMOJI_CATEGORIES.keys())[0]
+        self._load_category_by_name(first_cat)
+
+    def _render_recent_grid(self):
+        """Vẽ danh sách các Emoji vừa dùng."""
+        while self.recent_grid.count():
+            item = self.recent_grid.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        cols = 8
+        for i, emo in enumerate(self._recent_emojis[:16]):
+            btn = QPushButton(emo)
+            btn.setFixedSize(36, 36)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background: transparent;
+                    border: none;
+                    border-radius: 6px;
+                    font-size: 20px;
+                    font-family: 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif;
+                }
+                QPushButton:hover {
+                    background-color: rgba(255, 255, 255, 0.09);
+                }
+            """)
+            btn.clicked.connect(lambda _, e=emo: self._select_emoji(e))
+            self.recent_grid.addWidget(btn, i // cols, i % cols)
+
+    def _update_nav_styles(self, active_target: str):
+        """Cập nhật trạng thái active cho icon danh mục ở thanh đáy."""
+        for target, btn in self._cat_nav_buttons.items():
+            if target == active_target:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: rgba(59, 130, 246, 0.22);
+                        color: #3b82f6;
+                        border: none;
+                        border-radius: 6px;
+                        font-size: 16px;
+                    }
+                """)
+            else:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background: transparent;
+                        color: #7c8495;
+                        border: none;
+                        border-radius: 6px;
+                        font-size: 16px;
+                    }
+                    QPushButton:hover {
+                        background-color: rgba(255, 255, 255, 0.08);
+                        color: #ffffff;
+                    }
+                """)
+
+    def _on_nav_clicked(self, target: str):
+        if target == "recent":
+            self.scroll.verticalScrollBar().setValue(0)
+            self._update_nav_styles("recent")
+        elif target in self.EMOJI_CATEGORIES:
+            self._load_category_by_name(target)
+
+    def _on_next_category(self):
+        cats = list(self.EMOJI_CATEGORIES.keys())
+        try:
+            curr_idx = cats.index(self._current_category)
+            next_cat = cats[(curr_idx + 1) % len(cats)]
+            self._load_category_by_name(next_cat)
+        except ValueError:
+            self._load_category_by_name(cats[0])
+
+    def _load_category_by_name(self, cat_name: str):
+        if cat_name not in self.EMOJI_CATEGORIES:
+            return
+        self._current_category = cat_name
+        self.category_label.setText(cat_name)
+        emojis = self.EMOJI_CATEGORIES[cat_name]
+
+        # Đồng bộ QComboBox để các bài test vẫn hoạt động trơn tru
+        idx = list(self.EMOJI_CATEGORIES.keys()).index(cat_name)
+        if self.category_combo.currentIndex() != idx:
+            self.category_combo.blockSignals(True)
+            self.category_combo.setCurrentIndex(idx)
+            self.category_combo.blockSignals(False)
+
+        self._load_category(emojis)
+        self._update_nav_styles(cat_name)
 
     def _on_category_changed(self, idx: int):
-        cats = list(self.EMOJI_CATEGORIES.values())
+        cats = list(self.EMOJI_CATEGORIES.keys())
         if 0 <= idx < len(cats):
-            self._load_category(cats[idx])
+            self._load_category_by_name(cats[idx])
 
     def _load_category(self, emojis: list[str]):
+        """Nạp danh sách emoji vào lưới hiển thị."""
         while self.grid.count():
             item = self.grid.takeAt(0)
             if item.widget():
@@ -234,12 +513,30 @@ class EmojiPicker(QWidget):
         cols = 8
         for i, emo in enumerate(emojis):
             btn = QPushButton(emo)
-            btn.setFixedSize(34, 34)
+            btn.setFixedSize(36, 36)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background: transparent;
+                    border: none;
+                    border-radius: 6px;
+                    font-size: 20px;
+                    font-family: 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif;
+                }
+                QPushButton:hover {
+                    background-color: rgba(255, 255, 255, 0.09);
+                }
+            """)
             btn.clicked.connect(lambda _, e=emo: self._select_emoji(e))
             self.grid.addWidget(btn, i // cols, i % cols)
 
     def _select_emoji(self, emoji: str):
+        # Đưa emoji vào đầu danh sách gần đây
+        if emoji in self._recent_emojis:
+            self._recent_emojis.remove(emoji)
+        self._recent_emojis.insert(0, emoji)
+        self._render_recent_grid()
+
         self.emoji_selected.emit(emoji)
         self.hide()
 
