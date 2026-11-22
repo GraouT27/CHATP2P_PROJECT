@@ -22,6 +22,26 @@ class ForwardDialog(QDialog):
         self.available_peers = available_peers
         self.selected_peer_ids: list[str] = []
         self._checkboxes: dict[str, QCheckBox] = {}
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #f8f9fa;
+                color: #111111;
+            }
+            QLabel {
+                color: #111111;
+                font-size: 13px;
+            }
+            QListWidget {
+                background-color: #ffffff;
+                color: #111111;
+                border: 1px solid #ced4da;
+                border-radius: 6px;
+            }
+            QCheckBox {
+                color: #111111;
+                font-size: 13px;
+            }
+        """)
         self._setup_ui()
 
     def _setup_ui(self):
@@ -31,17 +51,23 @@ class ForwardDialog(QDialog):
 
         # Khung preview tin nhắn
         preview_frame = QFrame()
-        preview_frame.setStyleSheet("background-color: #2a2a40; border-left: 3px solid #1a73e8; border-radius: 4px; padding: 6px;")
+        preview_frame.setObjectName("previewFrame")
+        preview_frame.setStyleSheet("QFrame#previewFrame { background-color: #e8f0fe; border-left: 3px solid #1a73e8; border-radius: 4px; padding: 6px; }")
         prev_layout = QVBoxLayout(preview_frame)
-        prev_layout.addWidget(QLabel("Nội dung chuyển tiếp:"))
+        lbl_title = QLabel("Nội dung chuyển tiếp:")
+        lbl_title.setStyleSheet("color: #1a73e8; font-weight: bold;")
+        prev_layout.addWidget(lbl_title)
         disp_text = self.message_text if len(self.message_text) <= 120 else self.message_text[:120] + "..."
         lbl = QLabel(disp_text)
+        lbl.setStyleSheet("color: #111111;")
         lbl.setWordWrap(True)
         prev_layout.addWidget(lbl)
         layout.addWidget(preview_frame)
 
         # Danh sách Peer
-        layout.addWidget(QLabel("Chọn Peer nhận:"))
+        lbl_select = QLabel("Chọn Peer nhận:")
+        lbl_select.setStyleSheet("color: #111111; font-weight: bold;")
+        layout.addWidget(lbl_select)
         self.list_widget = QListWidget()
         if not self.available_peers:
             item = QListWidgetItem("Không có Peer nào đang Online")
@@ -51,6 +77,7 @@ class ForwardDialog(QDialog):
             for pid, uname in self.available_peers:
                 item = QListWidgetItem(self.list_widget)
                 cb = QCheckBox(f"{uname} ({pid})")
+                cb.setStyleSheet("color: #111111;")
                 self._checkboxes[pid] = cb
                 self.list_widget.setItemWidget(item, cb)
         layout.addWidget(self.list_widget, 1)
@@ -60,11 +87,12 @@ class ForwardDialog(QDialog):
         btn_box.addStretch()
 
         cancel_btn = QPushButton("Hủy")
+        cancel_btn.setStyleSheet("color: #111111; background-color: #e9ecef; border: 1px solid #ced4da; border-radius: 6px; padding: 6px 14px; font-weight: 500;")
         cancel_btn.clicked.connect(self.reject)
         btn_box.addWidget(cancel_btn)
 
         fwd_btn = QPushButton("Chuyển tiếp")
-        fwd_btn.setStyleSheet("background-color: #1a73e8; color: white; font-weight: bold; padding: 6px 14px; border-radius: 6px;")
+        fwd_btn.setStyleSheet("background-color: #1a73e8; color: white; font-weight: bold; padding: 6px 14px; border-radius: 6px; border: none;")
         fwd_btn.clicked.connect(self._on_confirm)
         btn_box.addWidget(fwd_btn)
 
@@ -84,9 +112,44 @@ class ConfigDialog(QDialog):
     def __init__(self, current_username: str, current_port: int, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Cấu Hình Mạng P2P")
-        self.setFixedSize(420, 420)
+        self.setFixedSize(430, 450)
         self.setModal(True)
         self._result = {}
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #f8f9fa;
+                color: #000000;
+            }
+            QLabel {
+                color: #000000;
+                font-size: 13px;
+            }
+            QLineEdit, QSpinBox {
+                background-color: #ffffff;
+                color: #000000;
+                border: 1px solid #ced4da;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 13px;
+                selection-background-color: #1a73e8;
+                selection-color: #ffffff;
+            }
+            QLineEdit:focus, QSpinBox:focus {
+                border: 1px solid #1a73e8;
+            }
+            QPushButton {
+                background-color: #e9ecef;
+                color: #000000;
+                border: 1px solid #ced4da;
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-size: 13px;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                background-color: #dee2e6;
+            }
+        """)
         self._setup_ui(current_username, current_port)
 
     def _setup_ui(self, username: str, port: int):
@@ -95,28 +158,35 @@ class ConfigDialog(QDialog):
         layout.setSpacing(12)
 
         title = QLabel("⚙️ Cấu Hình Nút Mạng P2P")
-        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1a73e8;")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1a73e8; background: transparent;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
 
         # Username
-        layout.addWidget(QLabel("Tên người dùng:"))
+        lbl_user = QLabel("Tên người dùng:")
+        lbl_user.setStyleSheet("color: #000000; font-weight: bold;")
+        layout.addWidget(lbl_user)
         self.user_input = QLineEdit(username)
+        self.user_input.setStyleSheet("color: #000000; background-color: #ffffff; border: 1px solid #ced4da; border-radius: 6px; padding: 6px 10px;")
         layout.addWidget(self.user_input)
 
         # Local Port
-        layout.addWidget(QLabel("Cổng lắng nghe (Listen Port):"))
+        lbl_port = QLabel("Cổng lắng nghe (Listen Port):")
+        lbl_port.setStyleSheet("color: #000000; font-weight: bold;")
+        layout.addWidget(lbl_port)
         self.port_input = QSpinBox()
         self.port_input.setRange(1024, 65535)
         self.port_input.setValue(port)
+        self.port_input.setStyleSheet("color: #000000; background-color: #ffffff; border: 1px solid #ced4da; border-radius: 6px; padding: 6px 10px;")
         layout.addWidget(self.port_input)
 
         # Chọn Avatar
         avatar_row = QHBoxLayout()
         self.avatar_label = QLabel("Chưa chọn ảnh avatar mới")
-        self.avatar_label.setStyleSheet("color: #b0b0c8; font-size: 11px;")
+        self.avatar_label.setStyleSheet("color: #333333; font-size: 12px;")
         self.avatar_path = ""
         browse_btn = QPushButton("📷 Chọn Avatar...")
+        browse_btn.setStyleSheet("color: #000000; background-color: #e9ecef; border: 1px solid #ced4da; border-radius: 6px; padding: 6px 12px; font-weight: 500;")
         browse_btn.clicked.connect(self._browse_avatar)
         avatar_row.addWidget(self.avatar_label, 1)
         avatar_row.addWidget(browse_btn)
@@ -124,20 +194,36 @@ class ConfigDialog(QDialog):
 
         # Kết nối nhanh tới Peer từ xa
         conn_frame = QFrame()
-        conn_frame.setStyleSheet("border: 1px solid #4a4a66; border-radius: 6px; padding: 10px;")
+        conn_frame.setObjectName("connFrame")
+        conn_frame.setStyleSheet("""
+            QFrame#connFrame {
+                border: 1px solid #ced4da;
+                border-radius: 8px;
+                background-color: #ffffff;
+                padding: 10px;
+            }
+        """)
         cf_layout = QVBoxLayout(conn_frame)
-        cf_layout.addWidget(QLabel("🔗 Kết nối nhanh tới Peer từ xa (Tùy chọn):"))
+        lbl_quick = QLabel("🔗 Kết nối nhanh tới Peer từ xa (Tùy chọn):")
+        lbl_quick.setStyleSheet("color: #000000; font-weight: bold;")
+        cf_layout.addWidget(lbl_quick)
 
         ip_row = QHBoxLayout()
-        ip_row.addWidget(QLabel("IP:"))
+        lbl_ip = QLabel("IP:")
+        lbl_ip.setStyleSheet("color: #000000; font-weight: bold;")
+        ip_row.addWidget(lbl_ip)
         self.peer_ip_input = QLineEdit("")
         self.peer_ip_input.setPlaceholderText("Để trống nếu không kết nối")
+        self.peer_ip_input.setStyleSheet("color: #000000; background-color: #ffffff; border: 1px solid #ced4da; border-radius: 6px; padding: 5px 8px;")
         ip_row.addWidget(self.peer_ip_input, 2)
-        ip_row.addWidget(QLabel("Port:"))
+        lbl_peer_port = QLabel("Port:")
+        lbl_peer_port.setStyleSheet("color: #000000; font-weight: bold;")
+        ip_row.addWidget(lbl_peer_port)
         self.peer_port_input = QSpinBox()
         self.peer_port_input.setRange(0, 65535)
         self.peer_port_input.setValue(0)
         self.peer_port_input.setSpecialValueText("--")
+        self.peer_port_input.setStyleSheet("color: #000000; background-color: #ffffff; border: 1px solid #ced4da; border-radius: 6px; padding: 5px 8px;")
         ip_row.addWidget(self.peer_port_input, 1)
         cf_layout.addLayout(ip_row)
         layout.addWidget(conn_frame)
@@ -147,11 +233,12 @@ class ConfigDialog(QDialog):
         btn_box.addStretch()
 
         cancel_btn = QPushButton("Hủy")
+        cancel_btn.setStyleSheet("color: #000000; background-color: #e9ecef; border: 1px solid #ced4da; border-radius: 6px; padding: 6px 14px; font-weight: 500;")
         cancel_btn.clicked.connect(self.reject)
         btn_box.addWidget(cancel_btn)
 
         save_btn = QPushButton("Lưu & Áp Dụng")
-        save_btn.setStyleSheet("background-color: #1a73e8; color: white; font-weight: bold; padding: 6px 14px; border-radius: 6px;")
+        save_btn.setStyleSheet("background-color: #1a73e8; color: #ffffff; font-weight: bold; padding: 6px 16px; border-radius: 6px; border: none;")
         save_btn.clicked.connect(self._on_save)
         btn_box.addWidget(save_btn)
 

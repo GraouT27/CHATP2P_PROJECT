@@ -30,7 +30,7 @@ from shared.protocol import (
     make_handshake_header, make_handshake_ack_header,
     make_key_exchange_header, make_chat_header, pack_message
 )
-from ui.peer_list_widget import PeerListWidget
+from ui.peer_list_widget import PeerListWidget, is_same_host
 from ui.chat_widgets import (
     AvatarWidget, ReplyPreview, EmojiPicker,
     MessageData, MessageListModel, MessageDelegate
@@ -316,12 +316,47 @@ class MainWindow(QMainWindow):
     def _on_peer_discovered(self, peer_id: str, username: str, ip: str, port: int):
         """Khi tìm thấy Peer mới qua mạng LAN."""
         safe_name = self._sanitize_username(username)
-        self._peer_info_map[peer_id] = {"ip": ip, "port": port, "username": safe_name, "status": "online"}
-        self.peer_list_panel.add_or_update_peer(peer_id, safe_name, ip, port, "online")
+        canonical_peer_id = f"{ip}:{port}"
+
+        # Chống nhân bản: Kiểm tra xem đã có mục nào đại diện cho Peer này chưa (canonical_id hoặc cùng port)
+        found_pid = None
+        for existing_pid, info in self._peer_info_map.items():
+            if existing_pid == canonical_peer_id:
+                found_pid = existing_pid
+                break
+            if info.get("port") == port:
+                same_host = is_same_host(info.get("ip", ""), ip)
+                same_name = (info.get("username", "").lower() == safe_name.lower())
+                is_placeholder = info.get("username", "").startswith("Peer_") or safe_name.startswith("Peer_")
+                if same_host or same_name or is_placeholder:
+                    found_pid = existing_pid
+                    break
+
+        if found_pid:
+            self._peer_info_map[found_pid]["status"] = "online"
+            if self._peer_info_map[found_pid].get("username", "").startswith("Peer_"):
+                self._peer_info_map[found_pid]["username"] = safe_name
+            current_name = self._peer_info_map[found_pid]["username"]
+            current_ip = self._peer_info_map[found_pid]["ip"]
+            current_avatar = self._peer_info_map[found_pid].get("avatar_path", "")
+            if canonical_peer_id != found_pid:
+                self._peer_info_map[canonical_peer_id] = self._peer_info_map[found_pid]
+            self.peer_list_panel.add_or_update_peer(found_pid, current_name, current_ip, port, "online", current_avatar)
+            if not self.crypto_mgr.has_session_key(found_pid):
+                self._send_handshake(found_pid, current_ip, port)
+            return
+
+        old_info = self._peer_info_map.get(canonical_peer_id, {})
+        final_avatar = old_info.get("avatar_path", "")
+        self._peer_info_map[canonical_peer_id] = {
+            "ip": ip, "port": port, "username": safe_name,
+            "status": "online", "avatar_path": final_avatar
+        }
+        self.peer_list_panel.add_or_update_peer(canonical_peer_id, safe_name, ip, port, "online", final_avatar)
 
         # Tự động gửi Handshake nếu chưa có khóa
-        if not self.crypto_mgr.has_session_key(peer_id):
-            self._send_handshake(peer_id, ip, port)
+        if not self.crypto_mgr.has_session_key(canonical_peer_id):
+            self._send_handshake(canonical_peer_id, ip, port)
 
     def _on_peer_lost(self, peer_id: str):
         if peer_id in self._peer_info_map:
@@ -416,20 +451,27 @@ class MainWindow(QMainWindow):
             target = f"{raw_ip}:{sender_port}"
             if target in self._peer_info_map:
                 return target
+            for pid, info in self._peer_info_map.items():
+                if info.get("port") == sender_port and is_same_host(info.get("ip", ""), raw_ip):
+                    return pid
+            for pid, info in self._peer_info_map.items():
+                if info.get("port") == sender_port:
+                    return pid
 
         if raw_peer_id in self._peer_info_map:
             return raw_peer_id
 
-        # Ưu tiên 2: Tìm theo username NHƯNG BẮT BUỘC phải cùng IP nguồn (info.get("ip") == raw_ip).
-        # Lý do: Nếu không kiểm tra cùng IP, kẻ tấn công ở máy khác chỉ cần đặt sender="Alice"
-        # để giả mạo và chèn tin nhắn lừa đảo vào đúng hội thoại của Alice thật.
+        # Ưu tiên 2: Tìm theo username (cùng host)
         if sender_name:
             for pid, info in self._peer_info_map.items():
-                if info.get("ip") == raw_ip and info.get("username") == sender_name:
+                if is_same_host(info.get("ip", ""), raw_ip) and info.get("username", "").lower() == sender_name.lower():
                     return pid
 
-        # Ưu tiên 3: Nếu chỉ có duy nhất 1 Peer đang đăng ký ở IP đó thì ánh xạ về Peer đó.
-        matching = [pid for pid, info in self._peer_info_map.items() if info.get("ip") == raw_ip]
+        # Ưu tiên 3: Nếu chỉ có duy nhất 1 Peer cùng host thì ánh xạ về Peer đó.
+        matching = [
+            pid for pid, info in self._peer_info_map.items()
+            if is_same_host(info.get("ip", ""), raw_ip)
+        ]
         if len(matching) == 1:
             return matching[0]
 
@@ -465,20 +507,40 @@ class MainWindow(QMainWindow):
         canonical_peer_id = f"{ip}:{actual_port}"
         safe_username = self._sanitize_username(username)
 
+        # Chống nhân bản: Kiểm tra xem đã có mục nào trong _peer_info_map đại diện cho Peer này chưa
+        target_pid = canonical_peer_id
+        for existing_pid, info in self._peer_info_map.items():
+            if existing_pid == canonical_peer_id:
+                target_pid = existing_pid
+                break
+            if info.get("port") == actual_port:
+                same_host = is_same_host(info.get("ip", ""), ip)
+                same_name = (info.get("username", "").lower() == safe_username.lower())
+                is_placeholder = info.get("username", "").startswith("Peer_") or safe_username.startswith("Peer_")
+                if same_host or same_name or is_placeholder:
+                    target_pid = existing_pid
+                    break
+
         if pub_key:
-            self.crypto_mgr.register_peer_public_key(canonical_peer_id, pub_key)
+            self.crypto_mgr.register_peer_public_key(target_pid, pub_key)
+            if target_pid != canonical_peer_id:
+                self.crypto_mgr.register_peer_public_key(canonical_peer_id, pub_key)
 
-        avatar_path = self._save_safe_avatar(canonical_peer_id, avatar_b64)
+        avatar_path = self._save_safe_avatar(target_pid, avatar_b64)
 
-        old_info = self._peer_info_map.get(canonical_peer_id, {})
+        old_info = self._peer_info_map.get(target_pid, {})
         final_avatar = avatar_path or old_info.get("avatar_path", "")
-        self._peer_info_map[canonical_peer_id] = {
-            "ip": ip, "port": actual_port, "username": safe_username,
+        dest_ip = old_info.get("ip", ip)
+        info_dict = {
+            "ip": dest_ip, "port": actual_port, "username": safe_username,
             "status": "online", "avatar_path": final_avatar
         }
-        self.peer_list_panel.add_or_update_peer(canonical_peer_id, safe_username, ip, actual_port, "online", final_avatar)
+        self._peer_info_map[target_pid] = info_dict
+        if canonical_peer_id != target_pid:
+            self._peer_info_map[canonical_peer_id] = info_dict
+        self.peer_list_panel.add_or_update_peer(target_pid, safe_username, dest_ip, actual_port, "online", final_avatar)
 
-        if self._current_peer_id == canonical_peer_id:
+        if self._current_peer_id == target_pid:
             self.header_name_label.setText(safe_username)
             if final_avatar:
                 self.header_avatar.set_image_path(final_avatar)
@@ -496,15 +558,17 @@ class MainWindow(QMainWindow):
             )
             send_message_direct(ip, actual_port, ack_h)
 
-            if not self.crypto_mgr.has_session_key(canonical_peer_id):
-                enc_session_key = self.crypto_mgr.generate_and_encrypt_session_key(canonical_peer_id)
+            if not self.crypto_mgr.has_session_key(target_pid):
+                enc_session_key = self.crypto_mgr.generate_and_encrypt_session_key(target_pid)
                 if enc_session_key:
+                    if target_pid != canonical_peer_id and self.crypto_mgr.has_session_key(target_pid):
+                        self.crypto_mgr._peer_session_keys[canonical_peer_id] = self.crypto_mgr._peer_session_keys[target_pid]
                     key_h = make_key_exchange_header(
                         self.username, enc_session_key, listen_port=self.listen_port
                     )
                     send_message_direct(ip, actual_port, key_h)
 
-        self._add_system_message(canonical_peer_id, f"🔒 Đã thiết lập kênh bảo mật RSA/AES-256 với {safe_username}.")
+        self._add_system_message(target_pid, f"🔒 Đã thiết lập kênh bảo mật RSA/AES-256 với {safe_username}.")
 
     def _on_key_exchange_done(self, peer_id: str):
         self.statusBar().showMessage(f"✅ Đã thiết lập mã hóa AES-256 với {peer_id}")
@@ -698,23 +762,40 @@ class MainWindow(QMainWindow):
         self.file_container.setVisible(True)
 
     def _on_file_task_progress(self, task: TransferTask):
-        w = self._file_row_widgets.get(task.task_id)
-        if w:
-            w.update_task(task)
+        if not task:
+            return
+        try:
+            w = self._file_row_widgets.get(task.task_id)
+            if w:
+                w.update_task(task)
+        except Exception as e:
+            log.warning(f"Lỗi cập nhật tiến độ file: {e}")
 
     def _on_file_task_completed(self, task: TransferTask):
-        w = self._file_row_widgets.get(task.task_id)
-        if w:
-            w.update_task(task)
-        act = "Đã gửi" if task.direction.value == "upload" else "Đã nhận"
-        self._add_system_message(task.peer_id, f"✅ {act} file '{task.file_name}' thành công!")
-        QTimer.singleShot(8000, lambda tid=task.task_id: self._remove_file_row(tid))
+        if not task:
+            return
+        try:
+            w = self._file_row_widgets.get(task.task_id)
+            if w:
+                w.update_task(task)
+            act = "Đã gửi" if task.direction.value == "upload" else "Đã nhận"
+            self._add_system_message(task.peer_id, f"✅ {act} file '{task.file_name}' thành công!")
+            QTimer.singleShot(8000, lambda tid=task.task_id: self._remove_file_row(tid))
+        except Exception as e:
+            log.warning(f"Lỗi hoàn thành task file: {e}")
 
     def _on_file_task_failed(self, task: TransferTask):
-        w = self._file_row_widgets.get(task.task_id)
-        if w:
-            w.update_task(task)
-        QTimer.singleShot(8000, lambda tid=task.task_id: self._remove_file_row(tid))
+        if not task:
+            return
+        try:
+            w = self._file_row_widgets.get(task.task_id)
+            if w:
+                w.update_task(task)
+            err_msg = task.error_msg or "Lỗi không xác định"
+            self._add_system_message(task.peer_id, f"❌ Truyền file '{task.file_name}' thất bại: {err_msg}")
+            QTimer.singleShot(8000, lambda tid=task.task_id: self._remove_file_row(tid))
+        except Exception as e:
+            log.warning(f"Lỗi thất bại task file: {e}")
 
     def _remove_file_row(self, task_id: str):
         w = self._file_row_widgets.pop(task_id, None)
@@ -811,14 +892,37 @@ class MainWindow(QMainWindow):
             peer_ip = res.get("peer_ip")
             peer_port = res.get("peer_port")
             if peer_ip and peer_port > 0:
-                if peer_ip in ("127.0.0.1", "localhost", "::1") and peer_port == self.listen_port:
+                # Chuẩn hóa loopback IP
+                norm_ip = "127.0.0.1" if peer_ip in ("localhost", "::1") else peer_ip
+                if is_same_host(norm_ip, "127.0.0.1") and peer_port == self.listen_port:
                     QMessageBox.warning(self, "Lỗi Kết Nối", "Không thể kết nối tới chính cổng lắng nghe của bạn!")
                     return
-                pid = f"{peer_ip}:{peer_port}"
-                self._peer_info_map[pid] = {"ip": peer_ip, "port": peer_port, "username": f"Peer_{peer_port}", "status": "online"}
-                self.peer_list_panel.add_or_update_peer(pid, f"Peer_{peer_port}", peer_ip, peer_port, "online")
-                self.peer_list_panel.select_peer(pid)
-                self._send_handshake(pid, peer_ip, peer_port)
+                pid = f"{norm_ip}:{peer_port}"
+
+                # Kiểm tra nếu peer này đã tồn tại trong _peer_info_map (tránh tạo trùng mục)
+                target_pid = pid
+                for existing_pid, info in self._peer_info_map.items():
+                    if info.get("port") == peer_port:
+                        if is_same_host(info.get("ip", ""), norm_ip):
+                            target_pid = existing_pid
+                            break
+
+                if target_pid not in self._peer_info_map:
+                    info_dict = {
+                        "ip": norm_ip, "port": peer_port, "username": f"Peer_{peer_port}", "status": "online"
+                    }
+                    self._peer_info_map[target_pid] = info_dict
+                    if pid != target_pid:
+                        self._peer_info_map[pid] = info_dict
+                    self.peer_list_panel.add_or_update_peer(target_pid, f"Peer_{peer_port}", norm_ip, peer_port, "online")
+                else:
+                    self._peer_info_map[target_pid]["status"] = "online"
+                    if pid != target_pid:
+                        self._peer_info_map[pid] = self._peer_info_map[target_pid]
+                    self.peer_list_panel.set_peer_status(target_pid, "online")
+
+                self.peer_list_panel.select_peer(target_pid)
+                self._send_handshake(target_pid, norm_ip, peer_port)
 
     def _show_about(self):
         info = (
