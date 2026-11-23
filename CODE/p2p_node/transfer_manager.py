@@ -17,7 +17,7 @@ import threading
 from typing import Optional, Callable
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
-from config import CHUNK_SIZE, MAX_CONCURRENT_TRANSFERS, RECEIVED_FILES_DIR
+from config import config, CHUNK_SIZE, MAX_CONCURRENT_TRANSFERS, RECEIVED_FILES_DIR
 from p2p_node.transfer_task import TransferTask, TransferDirection, TransferStatus
 from p2p_node.storage import resolve_filename, get_temp_filepath, append_chunk, finalize_file, remove_temp_file
 from security.crypto_manager import CryptoManager
@@ -124,8 +124,9 @@ class FileSenderThread(QThread):
                         self.task_progress.emit(self.task.task_id)
                         last_emit = now
 
-                    # Sleep nhẹ để socket buffer không nghẽn
-                    time.sleep(0.001)
+                    # Điều tiết nhẹ mỗi 16 chunk (~1MB) để socket buffer không nghẽn mà không làm chậm tốc độ truyền file lớn
+                    if chunk_idx % 16 == 0:
+                        time.sleep(0.001)
 
             if self.task.is_aborted:
                 cancel_h = make_file_cancel_header("User", self.task.task_id, "Người dùng đã hủy")
@@ -161,10 +162,11 @@ class TransferManager(QObject):
     task_completed = pyqtSignal(object)   # (TransferTask)
     task_failed = pyqtSignal(object)      # (TransferTask)
 
-    def __init__(self, crypto_mgr: CryptoManager, download_dir: str = RECEIVED_FILES_DIR, parent=None):
+    def __init__(self, crypto_mgr: CryptoManager, download_dir: str = RECEIVED_FILES_DIR, listen_port: int = 0, parent=None):
         super().__init__(parent)
         self.crypto_mgr = crypto_mgr
         self.download_dir = download_dir
+        self.listen_port = listen_port
         self.semaphore = threading.Semaphore(MAX_CONCURRENT_TRANSFERS)
 
         self.tasks: dict[str, TransferTask] = {}  # {task_id: TransferTask}
@@ -185,9 +187,15 @@ class TransferManager(QObject):
         self.tasks[task_id] = task
         self.task_added.emit(task)
 
+        my_port = getattr(self, "listen_port", 0)
+        if not my_port and self.parent():
+            my_port = getattr(self.parent(), "listen_port", 0)
+        if not my_port:
+            my_port = getattr(config, "listen_port", 0)
+
         worker = FileSenderThread(
             task, ip, port, self.crypto_mgr, self.semaphore,
-            listen_port=getattr(self, "listen_port", 0) or getattr(config, "listen_port", 0),
+            listen_port=my_port,
             parent=self
         )
         worker.task_progress.connect(lambda tid: self.tasks.get(tid) and self.task_progress.emit(self.tasks.get(tid)))

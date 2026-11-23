@@ -19,6 +19,67 @@ QDialog QLabel {
     color: #000000;
 }
 
+QDialog QPushButton {
+    color: #000000;
+}
+
+/* ========================== MESSAGE BOX ========================== */
+QMessageBox {
+    background-color: #ffffff;
+    color: #000000;
+}
+
+QMessageBox QLabel {
+    color: #000000;
+    font-size: 13px;
+}
+
+QMessageBox QPushButton {
+    background-color: #0d6efd;
+    color: #ffffff;
+    border: 1px solid #0d6efd;
+    border-radius: 6px;
+    padding: 6px 24px;
+    font-size: 13px;
+    font-weight: bold;
+    min-width: 70px;
+    min-height: 26px;
+}
+
+QMessageBox QPushButton:hover {
+    background-color: #0b5ed7;
+    border-color: #0a58ca;
+    color: #ffffff;
+}
+
+QMessageBox QPushButton:pressed {
+    background-color: #0a58ca;
+    border-color: #0a58ca;
+    color: #ffffff;
+}
+
+QMessageBox QPushButton:focus {
+    outline: none;
+    border: 2px solid #004085;
+}
+
+QDialogButtonBox QPushButton {
+    background-color: #0d6efd;
+    color: #ffffff;
+    border: 1px solid #0d6efd;
+    border-radius: 6px;
+    padding: 6px 20px;
+    font-size: 13px;
+    font-weight: bold;
+    min-width: 70px;
+}
+
+QDialogButtonBox QPushButton:hover {
+    background-color: #0b5ed7;
+    border-color: #0a58ca;
+    color: #ffffff;
+}
+
 /* ========================== MENUS ========================== */
 QMenuBar {
     background-color: #1e1e2e;

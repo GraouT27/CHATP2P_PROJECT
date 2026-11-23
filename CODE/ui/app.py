@@ -25,7 +25,7 @@ from p2p_node.listener import P2PListener
 from p2p_node.discovery import PeerDiscovery
 from p2p_node.transfer_manager import TransferManager
 from p2p_node.transfer_task import TransferTask, TransferStatus
-from p2p_node.sender import send_message_direct, PeerSocketClient
+from p2p_node.sender import send_message_direct, send_message_direct_async, PeerSocketClient
 from shared.protocol import (
     make_handshake_header, make_handshake_ack_header,
     make_key_exchange_header, make_chat_header, pack_message
@@ -59,11 +59,15 @@ class MainWindow(QMainWindow):
         qss_path = os.path.join(os.path.dirname(__file__), "styles.qss")
         if os.path.exists(qss_path):
             with open(qss_path, "r", encoding="utf-8") as f:
-                self.setStyleSheet(f.read())
+                qss_data = f.read()
+                self.setStyleSheet(qss_data)
+                app_inst = QApplication.instance()
+                if app_inst:
+                    app_inst.setStyleSheet(qss_data)
 
         # 1. Khởi tạo Core Cryptography & File Manager
         self.crypto_mgr = CryptoManager()
-        self.transfer_mgr = TransferManager(self.crypto_mgr, config.download_dir, parent=self)
+        self.transfer_mgr = TransferManager(self.crypto_mgr, config.download_dir, listen_port=self.listen_port, parent=self)
 
         # 2. Khởi tạo Message Handler & Network Listener
         self.msg_handler = MessageHandler(self.crypto_mgr, parent=self)
@@ -482,7 +486,7 @@ class MainWindow(QMainWindow):
         pub_key = self.crypto_mgr.get_public_key_pem()
         avatar_b64 = self._read_my_avatar_b64()
         h = make_handshake_header(self.username, self.listen_port, pub_key, avatar_b64=avatar_b64)
-        send_message_direct(ip, port, h)
+        send_message_direct_async(ip, port, h)
 
     def _on_handshake_received(self, peer_id: str, username: str, listen_port: int, pub_key: str, avatar_b64: str):
         self._handle_handshake(peer_id, username, listen_port, pub_key, avatar_b64, is_ack=False)
@@ -556,7 +560,7 @@ class MainWindow(QMainWindow):
                 # Bắt buộc đính kèm listen_port của mình để bên khởi tạo map đúng IP:listen_port (tránh tạo Ghost Peer).
                 listen_port=self.listen_port,
             )
-            send_message_direct(ip, actual_port, ack_h)
+            send_message_direct_async(ip, actual_port, ack_h)
 
             if not self.crypto_mgr.has_session_key(target_pid):
                 enc_session_key = self.crypto_mgr.generate_and_encrypt_session_key(target_pid)
@@ -566,7 +570,7 @@ class MainWindow(QMainWindow):
                     key_h = make_key_exchange_header(
                         self.username, enc_session_key, listen_port=self.listen_port
                     )
-                    send_message_direct(ip, actual_port, key_h)
+                    send_message_direct_async(ip, actual_port, key_h)
 
         self._add_system_message(target_pid, f"🔒 Đã thiết lập kênh bảo mật RSA/AES-256 với {safe_username}.")
 
@@ -887,6 +891,7 @@ class MainWindow(QMainWindow):
             config.save()
 
             self.peer_list_panel.update_self_info(self.username, self.listen_port, self.avatar_path)
+            self.transfer_mgr.listen_port = self.listen_port
             self.discovery.update_info(self.username, self.listen_port)
 
             peer_ip = res.get("peer_ip")
