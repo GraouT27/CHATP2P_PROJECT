@@ -51,6 +51,18 @@ class CryptoManager:
         try:
             public_key = serialization.load_pem_public_key(pem_str.encode("utf-8"))
             self._peer_public_keys[peer_id] = public_key
+            ip, _, port = peer_id.partition(":")
+            if port:
+                local_ips = {"127.0.0.1", "localhost", "::1"}
+                try:
+                    import socket
+                    for l_ip in socket.gethostbyname_ex(socket.gethostname())[2]:
+                        local_ips.add(l_ip)
+                except Exception:
+                    pass
+                if ip in local_ips:
+                    for l_ip in local_ips:
+                        self._peer_public_keys[f"{l_ip}:{port}"] = public_key
             return True
         except Exception as e:
             log.error(f"Lỗi nạp RSA Public Key từ {peer_id}: {e}")
@@ -61,15 +73,27 @@ class CryptoManager:
         Sinh khóa phiên AES-256 (32 bytes ngẫu nhiên) và mã hóa bằng RSA Public Key của Peer.
         Trả về chuỗi Base64 đã mã hóa để truyền qua mạng.
         """
-        if peer_id not in self._peer_public_keys:
+        peer_rsa_pub = self._find_public_key(peer_id)
+        if not peer_rsa_pub:
             log.warning(f"Chưa có RSA Public Key của {peer_id} để tạo session key")
             return None
 
         # Sinh 32 bytes (256 bits) ngẫu nhiên bằng bộ sinh số ngẫu nhiên an toàn của OS
         session_key = os.urandom(32)
         self._peer_session_keys[peer_id] = session_key
+        ip, _, port = peer_id.partition(":")
+        if port:
+            local_ips = {"127.0.0.1", "localhost", "::1"}
+            try:
+                import socket
+                for l_ip in socket.gethostbyname_ex(socket.gethostname())[2]:
+                    local_ips.add(l_ip)
+            except Exception:
+                pass
+            if ip in local_ips:
+                for l_ip in local_ips:
+                    self._peer_session_keys[f"{l_ip}:{port}"] = session_key
 
-        peer_rsa_pub = self._peer_public_keys[peer_id]
         encrypted_key = peer_rsa_pub.encrypt(
             session_key,
             padding.OAEP(
@@ -96,6 +120,18 @@ class CryptoManager:
             )
             if len(session_key) == 32:
                 self._peer_session_keys[peer_id] = session_key
+                ip, _, port = peer_id.partition(":")
+                if port:
+                    local_ips = {"127.0.0.1", "localhost", "::1"}
+                    try:
+                        import socket
+                        for l_ip in socket.gethostbyname_ex(socket.gethostname())[2]:
+                            local_ips.add(l_ip)
+                    except Exception:
+                        pass
+                    if ip in local_ips:
+                        for l_ip in local_ips:
+                            self._peer_session_keys[f"{l_ip}:{port}"] = session_key
                 return True
             return False
         except Exception as e:
@@ -105,7 +141,20 @@ class CryptoManager:
     def _find_public_key(self, peer_id: str):
         if peer_id in self._peer_public_keys:
             return self._peer_public_keys[peer_id]
-        ip = peer_id.split(":")[0] if ":" in peer_id else peer_id
+        ip, _, port = peer_id.partition(":")
+        if port:
+            local_ips = {"127.0.0.1", "localhost", "::1"}
+            try:
+                import socket
+                for l_ip in socket.gethostbyname_ex(socket.gethostname())[2]:
+                    local_ips.add(l_ip)
+            except Exception:
+                pass
+            if ip in local_ips:
+                for l_ip in local_ips:
+                    cand = f"{l_ip}:{port}"
+                    if cand in self._peer_public_keys:
+                        return self._peer_public_keys[cand]
         for pid, pub in self._peer_public_keys.items():
             if pid.startswith(f"{ip}:"):
                 return pub
@@ -114,7 +163,20 @@ class CryptoManager:
     def _find_session_key(self, peer_id: str) -> Optional[bytes]:
         if peer_id in self._peer_session_keys:
             return self._peer_session_keys[peer_id]
-        ip = peer_id.split(":")[0] if ":" in peer_id else peer_id
+        ip, _, port = peer_id.partition(":")
+        if port:
+            local_ips = {"127.0.0.1", "localhost", "::1"}
+            try:
+                import socket
+                for l_ip in socket.gethostbyname_ex(socket.gethostname())[2]:
+                    local_ips.add(l_ip)
+            except Exception:
+                pass
+            if ip in local_ips:
+                for l_ip in local_ips:
+                    cand = f"{l_ip}:{port}"
+                    if cand in self._peer_session_keys:
+                        return self._peer_session_keys[cand]
         for pid, key in self._peer_session_keys.items():
             if pid.startswith(f"{ip}:"):
                 return key
@@ -125,9 +187,17 @@ class CryptoManager:
         return self._find_session_key(peer_id) is not None
 
     def remove_peer_keys(self, peer_id: str):
-        """Xóa toàn bộ khóa của Peer khi ngắt kết nối."""
+        """Xóa toàn bộ khóa của Peer khi ngắt kết nối (bao gồm cả các alias IP loopback/LAN)."""
         self._peer_session_keys.pop(peer_id, None)
         self._peer_public_keys.pop(peer_id, None)
+        ip, _, port = peer_id.partition(":")
+        if port:
+            for k in list(self._peer_session_keys.keys()):
+                if k.endswith(f":{port}"):
+                    self._peer_session_keys.pop(k, None)
+            for k in list(self._peer_public_keys.keys()):
+                if k.endswith(f":{port}"):
+                    self._peer_public_keys.pop(k, None)
 
     # ========================== AES-256-GCM ENCRYPTION ==========================
 

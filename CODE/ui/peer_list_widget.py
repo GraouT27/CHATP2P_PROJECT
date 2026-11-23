@@ -2,12 +2,35 @@
 Peer List Widget Module - Khung danh sách Peer bên trái (TV2).
 """
 
+import socket
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QListWidget, QListWidgetItem, QFrame
 )
 from ui.chat_widgets import AvatarWidget
+
+
+def get_local_ips() -> set[str]:
+    """Lấy danh sách các IP đại diện cho chính máy tính cục bộ (loopback + LAN IPs)."""
+    ips = {"127.0.0.1", "localhost", "::1"}
+    try:
+        hostname = socket.gethostname()
+        for ip in socket.gethostbyname_ex(hostname)[2]:
+            ips.add(ip)
+    except Exception:
+        pass
+    return ips
+
+
+def is_same_host(ip1: str, ip2: str) -> bool:
+    """Kiểm tra 2 IP có trỏ đến cùng một máy chủ (host) hay không."""
+    if not ip1 or not ip2:
+        return False
+    if ip1 == ip2:
+        return True
+    local_ips = get_local_ips()
+    return (ip1 in local_ips and ip2 in local_ips)
 
 
 class PeerItemWidget(QWidget):
@@ -51,6 +74,7 @@ class PeerItemWidget(QWidget):
 
         self.addr_label = QLabel(f"{self.ip}:{self.port}")
         self.addr_label.setObjectName("peerIpLabel")
+        self.addr_label.setStyleSheet("color: #ffffff; font-size: 11px;")
         self.addr_label.setToolTip(f"Địa chỉ TCP: {self.ip}:{self.port}")
         info_layout.addWidget(self.addr_label)
 
@@ -82,6 +106,13 @@ class PeerItemWidget(QWidget):
         self.username = safe
         self.name_label.setText(safe)
         self.avatar.set_name(safe)
+
+    def update_endpoint(self, ip: str, port: int):
+        """Cập nhật lại IP và cổng mạng của Peer khi khởi động lại hoặc chuyển cổng."""
+        self.ip = ip
+        self.port = port
+        self.addr_label.setText(f"{self.ip}:{self.port}")
+        self.addr_label.setToolTip(f"Địa chỉ TCP: {self.ip}:{self.port}")
 
     def set_avatar_path(self, path: str):
         self.avatar_path = path
@@ -129,7 +160,7 @@ class PeerListWidget(QWidget):
         self.my_name_label = QLabel(self.username)
         self.my_name_label.setStyleSheet("font-weight: bold; font-size: 14px;")
         self.my_port_label = QLabel(f"Cổng: {self.port}")
-        self.my_port_label.setStyleSheet("color: #6c6c8a; font-size: 11px;")
+        self.my_port_label.setStyleSheet("color: #ffffff; font-size: 11px;")
         my_info.addWidget(self.my_name_label)
         my_info.addWidget(self.my_port_label)
         h_layout.addLayout(my_info, 1)
@@ -164,20 +195,78 @@ class PeerListWidget(QWidget):
         if avatar_path:
             self.my_avatar.set_image_path(avatar_path)
 
+    def remove_peer(self, peer_id: str):
+        """Xóa một Peer khỏi danh sách giao diện."""
+        widget = self._get_widget(peer_id)
+        if not widget:
+            return
+
+        # Xóa toàn bộ các alias trỏ đến widget này trong _peer_widgets
+        for pid, w in list(self._peer_widgets.items()):
+            if w == widget:
+                del self._peer_widgets[pid]
+
+        for row in range(self.list_widget.count()):
+            item = self.list_widget.item(row)
+            if item and self.list_widget.itemWidget(item) == widget:
+                self.list_widget.takeItem(row)
+                widget.deleteLater()
+                break
+
     def add_or_update_peer(self, peer_id: str, username: str, ip: str, port: int,
                            status: str = "online", avatar_path: str = ""):
+        matched_widget = None
+        matched_pid = None
+
         if peer_id in self._peer_widgets:
-            widget = self._peer_widgets[peer_id]
-            widget.set_username(username)
-            widget.set_status(status)
+            matched_widget = self._peer_widgets[peer_id]
+            matched_pid = peer_id
+        else:
+            is_real_name = bool(username and not username.startswith("Peer_"))
+            for existing_pid, widget in list(self._peer_widgets.items()):
+                same_host = is_same_host(widget.ip, ip)
+                is_widget_real = bool(widget.username and not widget.username.startswith("Peer_"))
+                same_real_name = is_real_name and is_widget_real and (widget.username.lower() == username.lower())
+                same_port = (port > 0 and widget.port == port)
+                either_placeholder = widget.username.startswith("Peer_") or username.startswith("Peer_")
+
+                # Trùng nếu:
+                # 1) Cùng tên thật (AliceTest, Bob, ...) -> luôn đại diện cho cùng 1 người, không nhân bản
+                # 2) HOẶC cùng port (khi kết nối qua loopback / LAN IP / placeholder)
+                if same_real_name or (same_port and (same_host or either_placeholder)):
+                    matched_widget = widget
+                    matched_pid = existing_pid
+                    break
+
+        if matched_widget:
+            if username and (not username.startswith("Peer_") or matched_widget.username.startswith("Peer_")):
+                matched_widget.set_username(username)
+            if port > 0:
+                matched_widget.update_endpoint(ip, port)
+            matched_widget.set_status(status)
             if avatar_path:
-                widget.set_avatar_path(avatar_path)
+                matched_widget.set_avatar_path(avatar_path)
+
+            self._peer_widgets[matched_pid] = matched_widget
+            self._peer_widgets[peer_id] = matched_widget
+
+            for row in range(self.list_widget.count()):
+                item = self.list_widget.item(row)
+                if item and item.data(Qt.ItemDataRole.UserRole) in (matched_pid, peer_id):
+                    item.setData(Qt.ItemDataRole.UserRole, peer_id)
+                    break
+
+            # Dọn dẹp triệt để bất kỳ mục rác trùng lặp cũ nào khác cùng tên
+            is_real_name = bool(matched_widget.username and not matched_widget.username.startswith("Peer_"))
+            if is_real_name:
+                for other_pid, other_w in list(self._peer_widgets.items()):
+                    if other_w != matched_widget and other_w.username.lower() == matched_widget.username.lower():
+                        if other_w.status == "offline" or is_same_host(other_w.ip, matched_widget.ip):
+                            self.remove_peer(other_pid)
             return
 
         item = QListWidgetItem(self.list_widget)
         # Lưu trực tiếp peer_id vào Qt.ItemDataRole.UserRole của QListWidgetItem.
-        # Lý do: nếu sau này danh sách bị sắp xếp hoặc xóa bớt dòng, lấy ID theo chỉ số dict sẽ bị lệch;
-        # UserRole gắn chặt ID vào đúng item giúp chọn Peer luôn chính xác.
         item.setData(Qt.ItemDataRole.UserRole, peer_id)
         item.setSizeHint(QSize(280, 68))
 
@@ -185,13 +274,26 @@ class PeerListWidget(QWidget):
         self.list_widget.setItemWidget(item, widget)
         self._peer_widgets[peer_id] = widget
 
-    def set_peer_status(self, peer_id: str, status: str):
+    def _get_widget(self, peer_id: str) -> PeerItemWidget | None:
         if peer_id in self._peer_widgets:
-            self._peer_widgets[peer_id].set_status(status)
+            return self._peer_widgets[peer_id]
+        ip, _, port_s = peer_id.partition(":")
+        if port_s.isdigit():
+            port = int(port_s)
+            for pid, w in self._peer_widgets.items():
+                if w.port == port and is_same_host(w.ip, ip):
+                    return w
+        return None
+
+    def set_peer_status(self, peer_id: str, status: str):
+        w = self._get_widget(peer_id)
+        if w:
+            w.set_status(status)
 
     def update_last_message(self, peer_id: str, text: str):
-        if peer_id in self._peer_widgets:
-            self._peer_widgets[peer_id].set_last_message(text)
+        w = self._get_widget(peer_id)
+        if w:
+            w.set_last_message(text)
 
     def _on_selection_changed(self):
         items = self.list_widget.selectedItems()
@@ -203,23 +305,28 @@ class PeerListWidget(QWidget):
             self.peer_selected.emit(str(peer_id))
 
     def get_peer_widget(self, peer_id: str) -> PeerItemWidget | None:
-        return self._peer_widgets.get(peer_id)
+        return self._get_widget(peer_id)
 
     def get_peer_status(self, peer_id: str) -> str:
-        w = self._peer_widgets.get(peer_id)
+        w = self._get_widget(peer_id)
         return w.status if w else "offline"
 
     def select_peer(self, peer_id: str):
         """Chọn trực quan một Peer trên danh sách theo peer_id."""
+        w = self._get_widget(peer_id)
+        target_id = w.peer_id if w else peer_id
         for row in range(self.list_widget.count()):
             item = self.list_widget.item(row)
-            if item and item.data(Qt.ItemDataRole.UserRole) == peer_id:
+            if item and item.data(Qt.ItemDataRole.UserRole) in (peer_id, target_id):
                 self.list_widget.setCurrentRow(row)
                 return
 
     def get_all_peers(self, online_only: bool = False) -> list[tuple[str, str]]:
+        seen_widgets = set()
         res = []
         for pid, w in self._peer_widgets.items():
-            if not online_only or w.status == "online":
-                res.append((pid, w.username))
+            if w not in seen_widgets:
+                seen_widgets.add(w)
+                if not online_only or w.status == "online":
+                    res.append((w.peer_id, w.username))
         return res

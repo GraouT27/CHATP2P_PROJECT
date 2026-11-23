@@ -12,11 +12,12 @@ import os
 import time
 import uuid
 import base64
+import hashlib
 import threading
 from typing import Optional, Callable
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
-from config import CHUNK_SIZE, MAX_CONCURRENT_TRANSFERS, RECEIVED_FILES_DIR
+from config import config, CHUNK_SIZE, MAX_CONCURRENT_TRANSFERS, RECEIVED_FILES_DIR
 from p2p_node.transfer_task import TransferTask, TransferDirection, TransferStatus
 from p2p_node.storage import resolve_filename, get_temp_filepath, append_chunk, finalize_file, remove_temp_file
 from security.crypto_manager import CryptoManager
@@ -33,13 +34,16 @@ class FileSenderThread(QThread):
     task_failed = pyqtSignal(str, str)# (task_id, error_msg)
 
     def __init__(self, task: TransferTask, target_ip: str, target_port: int,
-                 crypto_mgr: CryptoManager, semaphore: threading.Semaphore, parent=None):
+                 crypto_mgr: CryptoManager, semaphore: threading.Semaphore,
+                 listen_port: int = 0, sender_username: str = "User", parent=None):
         super().__init__(parent)
         self.task = task
         self.target_ip = target_ip
         self.target_port = target_port
         self.crypto_mgr = crypto_mgr
         self.semaphore = semaphore
+        self.listen_port = listen_port
+        self.sender_username = sender_username or "User"
 
     def run(self):
         # Chờ Semaphore cho phép chạy trong giới hạn đồng thời
@@ -56,20 +60,22 @@ class FileSenderThread(QThread):
             total_chunks = (self.task.file_size + CHUNK_SIZE - 1) // CHUNK_SIZE if self.task.file_size > 0 else 1
             self.task.total_chunks = total_chunks
 
-            # 2. Mở kết nối Socket TCP
+            # 2. Mở kết nối Socket TCP (timeout 60s để truyền file lớn ổn định)
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(10.0)
+            sock.settimeout(60.0)
             sock.connect((self.target_ip, self.target_port))
 
             # 3. Gửi gói tin file_start
             start_header = make_file_start_header(
-                username=self.crypto_mgr._peer_session_keys.get(self.task.peer_id, "User") and "User" or "User",
+                username=self.sender_username,
                 file_id=self.task.task_id,
                 file_name=self.task.file_name,
                 file_size=self.task.file_size,
                 total_chunks=total_chunks,
                 file_hash=file_hash,
             )
+            if self.listen_port:
+                start_header["sender_port"] = self.listen_port
             sock.sendall(pack_message(start_header))
 
             # 4. Đọc file nhị phân và gửi từng chunk 64KB
@@ -104,6 +110,8 @@ class FileSenderThread(QThread):
                         is_encrypted=is_encrypted,
                         nonce=nonce_str,
                     )
+                    if self.listen_port:
+                        chunk_header["sender_port"] = self.listen_port
 
                     sock.sendall(pack_message(chunk_header, payload_to_send))
 
@@ -117,8 +125,9 @@ class FileSenderThread(QThread):
                         self.task_progress.emit(self.task.task_id)
                         last_emit = now
 
-                    # Sleep nhẹ để socket buffer không nghẽn
-                    time.sleep(0.001)
+                    # Điều tiết nhẹ mỗi 16 chunk (~1MB) để socket buffer không nghẽn mà không làm chậm tốc độ truyền file lớn
+                    if chunk_idx % 16 == 0:
+                        time.sleep(0.001)
 
             if self.task.is_aborted:
                 cancel_h = make_file_cancel_header("User", self.task.task_id, "Người dùng đã hủy")
@@ -154,10 +163,11 @@ class TransferManager(QObject):
     task_completed = pyqtSignal(object)   # (TransferTask)
     task_failed = pyqtSignal(object)      # (TransferTask)
 
-    def __init__(self, crypto_mgr: CryptoManager, download_dir: str = RECEIVED_FILES_DIR, parent=None):
+    def __init__(self, crypto_mgr: CryptoManager, download_dir: str = RECEIVED_FILES_DIR, listen_port: int = 0, parent=None):
         super().__init__(parent)
         self.crypto_mgr = crypto_mgr
         self.download_dir = download_dir
+        self.listen_port = listen_port
         self.semaphore = threading.Semaphore(MAX_CONCURRENT_TRANSFERS)
 
         self.tasks: dict[str, TransferTask] = {}  # {task_id: TransferTask}
@@ -174,19 +184,30 @@ class TransferManager(QObject):
             peer_id=peer_id,
             direction=TransferDirection.UPLOAD,
             file_path=file_path,
-        return TCPSender(
-            sender_id=self.sender_id,
-            receiver_id=receiver_id,
-            ip=peer["ip"],
-            tcp_port=peer["tcp_port"],
         )
         self.tasks[task_id] = task
         self.task_added.emit(task)
 
-        worker = FileSenderThread(task, ip, port, self.crypto_mgr, self.semaphore, self)
-        worker.task_progress.connect(lambda tid: self.task_progress.emit(self.tasks.get(tid)))
-        worker.task_done.connect(lambda tid: self.task_completed.emit(self.tasks.get(tid)))
-        worker.task_failed.connect(lambda tid, err: self.task_failed.emit(self.tasks.get(tid)))
+        my_port = getattr(self, "listen_port", 0)
+        if not my_port and self.parent():
+            my_port = getattr(self.parent(), "listen_port", 0)
+        if not my_port:
+            my_port = getattr(config, "listen_port", 0)
+
+        my_user = getattr(self, "username", "")
+        if not my_user and self.parent():
+            my_user = getattr(self.parent(), "username", "")
+        if not my_user:
+            my_user = getattr(config, "username", "User")
+
+        worker = FileSenderThread(
+            task, ip, port, self.crypto_mgr, self.semaphore,
+            listen_port=my_port, sender_username=my_user,
+            parent=self
+        )
+        worker.task_progress.connect(lambda tid: self.tasks.get(tid) and self.task_progress.emit(self.tasks.get(tid)))
+        worker.task_done.connect(lambda tid: self.tasks.get(tid) and self.task_completed.emit(self.tasks.get(tid)))
+        worker.task_failed.connect(lambda tid, err: self.tasks.get(tid) and self.task_failed.emit(self.tasks.get(tid)))
 
         self._sender_threads[task_id] = worker
         worker.start()
@@ -194,11 +215,11 @@ class TransferManager(QObject):
 
     def handle_file_start(self, peer_id: str, header: dict):
         """Xử lý khi bên kia bắt đầu gửi file."""
-        file_id = header.get("file_id")
+        file_id = header.get("file_id") or header.get("task_id")
         file_name = header.get("file_name", "downloaded_file")
         file_size = header.get("file_size", 0)
         total_chunks = header.get("total_chunks", 1)
-        file_hash = header.get("file_hash", "")
+        file_hash = header.get("file_hash") or header.get("sha256", "")
 
         # Đường dẫn lưu tạm .part và đường dẫn đích
         temp_path = get_temp_filepath(self.download_dir, file_id, file_name)
@@ -206,6 +227,9 @@ class TransferManager(QObject):
 
         # Xóa file tạm cũ nếu có
         remove_temp_file(temp_path)
+
+        sender_name = header.get("sender", "")
+        sender_port = header.get("sender_port", 0)
 
         task = TransferTask(
             task_id=file_id,
@@ -216,9 +240,21 @@ class TransferManager(QObject):
             total_chunks=total_chunks,
             file_hash=file_hash,
         )
+        task.sender_name = sender_name
+        task.sender_port = sender_port
         task.temp_path = temp_path
         task.final_path = final_path
         task.status = TransferStatus.TRANSFERRING
+        task._last_progress_emit = 0.0
+
+        # Mở sẵn file handle và khởi tạo hasher để ghi liên tục và tính SHA-256 lũy tiến
+        try:
+            task._file_handle = open(temp_path, "wb")
+            task._hasher = hashlib.sha256()
+        except Exception as e:
+            log.error(f"Không thể mở file tạm {temp_path}: {e}")
+            task._file_handle = None
+            task._hasher = None
 
         self.tasks[file_id] = task
         self.task_added.emit(task)
@@ -226,19 +262,56 @@ class TransferManager(QObject):
 
     def handle_file_chunk(self, peer_id: str, header: dict, chunk_bytes: bytes):
         """Ghi nhận một chunk dữ liệu nhị phân."""
-        file_id = header.get("file_id")
+        file_id = header.get("file_id") or header.get("task_id")
         task = self.tasks.get(file_id)
-        if not task or task.is_aborted:
+        if not task or task.is_aborted or task.status == TransferStatus.COMPLETED:
             return
 
         try:
-            append_chunk(task.temp_path, chunk_bytes)
+            # Ghi trực tiếp vào file handle mở sẵn để tối ưu I/O và tránh nghẽn luồng
+            if getattr(task, "_file_handle", None) and not task._file_handle.closed:
+                task._file_handle.write(chunk_bytes)
+            else:
+                append_chunk(task.temp_path, chunk_bytes)
+
+            if getattr(task, "_hasher", None) is not None:
+                task._hasher.update(chunk_bytes)
+
             task.update_progress(len(chunk_bytes))
-            self.task_progress.emit(task)
+
+            # Điều tiết tín hiệu GUI (tối đa mỗi 50ms) để không làm đơ/sập giao diện khi truyền file lớn
+            now = time.time()
+            if now - getattr(task, "_last_progress_emit", 0.0) >= 0.05 or task.transferred_bytes >= task.file_size:
+                task._last_progress_emit = now
+                self.task_progress.emit(task)
 
             # Nếu đã nhận đủ số byte
             if task.transferred_bytes >= task.file_size:
-                success = finalize_file(task.temp_path, task.final_path, task.file_hash)
+                if getattr(task, "_file_handle", None) and not task._file_handle.closed:
+                    task._file_handle.flush()
+                    try:
+                        os.fsync(task._file_handle.fileno())
+                    except OSError:
+                        pass
+                    task._file_handle.close()
+                    task._file_handle = None
+
+                actual_hash = task._hasher.hexdigest().lower() if getattr(task, "_hasher", None) else None
+                success = False
+                if actual_hash and task.file_hash:
+                    if actual_hash == task.file_hash.lower():
+                        if os.path.exists(task.final_path):
+                            try:
+                                os.remove(task.final_path)
+                            except OSError:
+                                pass
+                        os.replace(task.temp_path, task.final_path)
+                        success = True
+                    else:
+                        remove_temp_file(task.temp_path)
+                else:
+                    success = finalize_file(task.temp_path, task.final_path, task.file_hash)
+
                 if success:
                     task.status = TransferStatus.COMPLETED
                     self.task_completed.emit(task)
@@ -246,11 +319,18 @@ class TransferManager(QObject):
                 else:
                     task.status = TransferStatus.ERROR
                     task.error_msg = "Kiểm tra toàn vẹn SHA-256 thất bại!"
+                    remove_temp_file(task.temp_path)
                     self.task_failed.emit(task)
 
         except Exception as e:
             task.status = TransferStatus.ERROR
             task.error_msg = str(e)
+            if getattr(task, "_file_handle", None) and not task._file_handle.closed:
+                try:
+                    task._file_handle.close()
+                except Exception:
+                    pass
+                task._file_handle = None
             remove_temp_file(task.temp_path)
             self.task_failed.emit(task)
 
@@ -261,6 +341,13 @@ class TransferManager(QObject):
             return
 
         task.abort("Người dùng đã hủy")
+        if getattr(task, "_file_handle", None) and not task._file_handle.closed:
+            try:
+                task._file_handle.close()
+            except Exception:
+                pass
+            task._file_handle = None
+
         if task_id in self._sender_threads:
             self._sender_threads[task_id].quit()
 
@@ -274,4 +361,51 @@ class TransferManager(QObject):
         for tid, task in list(self.tasks.items()):
             if task.peer_id == peer_id and task.status == TransferStatus.TRANSFERRING:
                 log.warning(f"Peer {peer_id} ngắt kết nối: Hủy tác vụ file {tid}")
+                if getattr(task, "_file_handle", None) and not task._file_handle.closed:
+                    try:
+                        task._file_handle.close()
+                    except Exception:
+                        pass
+                    task._file_handle = None
                 self.cancel_task(tid)
+
+    def delete_transferred_file(self, file_name: str, file_id: str = "") -> bool:
+        """
+        Xóa file đã tải về hoặc đang tải (khi đối phương thu hồi hoặc người dùng xóa).
+        Đảm bảo đóng an toàn file handle và xóa file vật lý khỏi đĩa.
+        """
+        deleted = False
+
+        # 1. Hủy và xóa task trong bộ nhớ nếu đang chạy
+        if file_id and file_id in self.tasks:
+            task = self.tasks[file_id]
+            task.abort("Đã thu hồi / xóa")
+            if getattr(task, "_file_handle", None) and not task._file_handle.closed:
+                try:
+                    task._file_handle.close()
+                except Exception:
+                    pass
+                task._file_handle = None
+            if getattr(task, "temp_path", None) and os.path.exists(task.temp_path):
+                remove_temp_file(task.temp_path)
+                deleted = True
+            if getattr(task, "final_path", None) and os.path.exists(task.final_path):
+                try:
+                    os.remove(task.final_path)
+                    deleted = True
+                except Exception:
+                    pass
+
+        # 2. Xóa file vật lý trong thư mục download_dir
+        if file_name:
+            safe_name = os.path.basename(file_name)
+            target = os.path.join(self.download_dir, safe_name)
+            if os.path.exists(target):
+                try:
+                    os.remove(target)
+                    deleted = True
+                    log.info(f"Đã xóa file '{safe_name}' khỏi {self.download_dir}")
+                except Exception as e:
+                    log.warning(f"Không thể xóa file {target}: {e}")
+
+        return deleted

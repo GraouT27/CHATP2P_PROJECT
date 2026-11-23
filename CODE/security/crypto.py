@@ -48,6 +48,25 @@ class ReplayError(DecryptError):
     """Goi co so thu tu cu (nghi bi phat lai)."""
 
 
+class SecretBytes(bytes):
+    """bytes chua khoa: khong tu in ra gia tri.
+
+    repr()/str()/print()/f-string chi hien do dai, nen khoa KHONG lo khi Traceback duoc
+    in kem gia tri bien cuc bo (pytest --showlocals, traceback capture_locals, trang loi debug).
+    Khong the pickle/copy de tranh vo tinh ghi khoa ra dia. Van dung nhu bytes thuong
+    (so sanh, AESGCM, ...); .hex()/base64 van lo gia tri neu code chu dong goi - dung lam vay.
+    """
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return f"<SecretBytes len={len(self)}>"
+
+    __str__ = __repr__
+
+    def __reduce__(self):
+        raise TypeError("Khong duoc pickle/copy khoa bi mat")
+
+
 def _load_public(pem: str):
     try:
         return serialization.load_pem_public_key(pem.encode("ascii"))
@@ -99,7 +118,7 @@ class KeyPair:
     def decrypt_session_key(self, encrypted_b64: str) -> bytes:
         try:
             cipher = base64.b64decode(encrypted_b64, validate=True)
-            key = self.__private.decrypt(cipher, _OAEP)
+            key = SecretBytes(self.__private.decrypt(cipher, _OAEP))
         except (binascii.Error, ValueError, TypeError) as exc:
             raise CryptoError("Khong giai ma duoc khoa phien") from exc
         if len(key) != KEY_SIZE:
@@ -110,8 +129,8 @@ class KeyPair:
         return f"<KeyPair {self.short_id()}>"
 
 
-def new_session_key() -> bytes:
-    return secrets.token_bytes(KEY_SIZE)
+def new_session_key() -> SecretBytes:
+    return SecretBytes(secrets.token_bytes(KEY_SIZE))
 
 
 def encrypt_session_key(peer_public_pem: str, session_key: bytes) -> str:
@@ -128,8 +147,8 @@ def handshake_salt(initiator_public_pem: str, responder_public_pem: str) -> byte
     return hashlib.sha256(data).digest()
 
 
-def _derive(session_key: bytes, salt: bytes, info: bytes) -> bytes:
-    return HKDF(algorithm=hashes.SHA256(), length=KEY_SIZE, salt=salt, info=info).derive(session_key)
+def _derive(session_key: bytes, salt: bytes, info: bytes) -> SecretBytes:
+    return SecretBytes(HKDF(algorithm=hashes.SHA256(), length=KEY_SIZE, salt=salt, info=info).derive(session_key))
 
 
 class SessionCrypto:
@@ -176,8 +195,8 @@ class SessionCrypto:
         """Khoa rieng cho 1 lan truyen file. Ben gui dung sending=True, ben nhan sending=False
         (hai ben tu dan xuat ra cung mot khoa, khong can trao doi them)."""
         base = self.__send_key if sending else self.__recv_key
-        file_key = HKDF(algorithm=hashes.SHA256(), length=KEY_SIZE, salt=None,
-                        info=b"p2p-chat file " + transfer_id.encode("utf-8")).derive(base)
+        file_key = SecretBytes(HKDF(algorithm=hashes.SHA256(), length=KEY_SIZE, salt=None,
+                                    info=b"p2p-chat file " + transfer_id.encode("utf-8")).derive(base))
         return ChunkCrypto(file_key, total_chunks)
 
     def __repr__(self) -> str:

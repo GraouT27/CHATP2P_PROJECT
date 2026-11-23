@@ -3,6 +3,7 @@ import base64
 import hashlib
 import os
 import socket
+import struct
 import threading
 import uuid
 
@@ -352,6 +353,24 @@ def send_message_direct(ip: str, port: int, header: dict, payload: bytes = b"") 
             sock.close()
         except Exception:
             pass
+
+
+def send_message_direct_async(ip: str, port: int, header: dict, payload: bytes = b"", callback=None):
+    """
+    Gửi gói tin TCP trực tiếp trên một luồng nền daemon độc lập (non-blocking).
+    Đảm bảo tuyệt đối không làm đơ/treo GUI khi gửi ACK, Key Exchange hoặc có bão kết nối.
+    """
+    def _worker():
+        ok, err = send_message_direct(ip, port, header, payload)
+        if callback:
+            try:
+                callback(ok, err)
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    return t
 
 
 class PeerSocketClient:

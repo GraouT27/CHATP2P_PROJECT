@@ -50,9 +50,20 @@ class SpeedMeter:
 
             return self._speed
 
+    def add_bytes(self, bytes_count):
+        """Bí danh cho update() để tương thích ngược."""
+        return self.update(bytes_count)
+
     def get_speed(self):
         with self._lock:
             return self._speed
+
+    def get_speed_str(self) -> str:
+        """Định dạng chuỗi tốc độ người đọc được (VD: '1.2 MB/s')."""
+        from shared.format import format_speed
+        with self._lock:
+            spd = self._speed
+        return format_speed(spd)
 
     def get_total_bytes(self):
         with self._lock:
