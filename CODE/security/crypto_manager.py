@@ -187,9 +187,17 @@ class CryptoManager:
         return self._find_session_key(peer_id) is not None
 
     def remove_peer_keys(self, peer_id: str):
-        """Xóa toàn bộ khóa của Peer khi ngắt kết nối."""
+        """Xóa toàn bộ khóa của Peer khi ngắt kết nối (bao gồm cả các alias IP loopback/LAN)."""
         self._peer_session_keys.pop(peer_id, None)
         self._peer_public_keys.pop(peer_id, None)
+        ip, _, port = peer_id.partition(":")
+        if port:
+            for k in list(self._peer_session_keys.keys()):
+                if k.endswith(f":{port}"):
+                    self._peer_session_keys.pop(k, None)
+            for k in list(self._peer_public_keys.keys()):
+                if k.endswith(f":{port}"):
+                    self._peer_public_keys.pop(k, None)
 
     # ========================== AES-256-GCM ENCRYPTION ==========================
 

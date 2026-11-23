@@ -65,6 +65,76 @@ def test_peer_list_widget_deduplication_methods(qapp):
     assert widget.list_widget.count() == 0
 
 
+def test_multiple_restarts_different_ports_deduplication(qapp):
+    """
+    Kiểm tra tình huống người dùng thực tế:
+    - AliceTest khởi động trên cổng 9988, rồi tắt (offline)
+    - AliceTest mở lại trên cổng 9977, rồi tắt (offline)
+    - AliceTest mở lại trên cổng 62201 (online)
+    - Bob mở trên cổng 9002 (online), sau đó gửi qua cổng tạm 60042
+    Đảm bảo: Tuyệt đối không nhân bản, chỉ có duy nhất 1 AliceTest và 1 Bob trên danh sách!
+    """
+    widget = PeerListWidget("MyNode", 9001)
+
+    # 1. AliceTest chạy lần 1 trên port 9988, sau đó offline
+    widget.add_or_update_peer("192.168.2.122:9988", "AliceTest", "192.168.2.122", 9988, "online")
+    assert widget.list_widget.count() == 1
+    widget.set_peer_status("192.168.2.122:9988", "offline")
+
+    # 2. AliceTest chạy lần 2 trên port 9977, sau đó offline
+    widget.add_or_update_peer("192.168.2.122:9977", "AliceTest", "192.168.2.122", 9977, "online")
+    assert widget.list_widget.count() == 1, "AliceTest bị nhân bản khi đổi port lần 1!"
+    widget.set_peer_status("192.168.2.122:9977", "offline")
+
+    # 3. AliceTest chạy lần 3 trên port 62201 (online)
+    widget.add_or_update_peer("192.168.2.122:62201", "AliceTest", "192.168.2.122", 62201, "online")
+    assert widget.list_widget.count() == 1, "AliceTest bị nhân bản khi đổi port lần 2!"
+
+    # 4. Bob xuất hiện trên port 9002
+    widget.add_or_update_peer("192.168.2.122:9002", "Bob", "192.168.2.122", 9002, "online")
+    assert widget.list_widget.count() == 2
+
+    # 5. Bob gửi gói tin hoặc kết nối từ cổng tạm thời 60042
+    widget.add_or_update_peer("192.168.2.122:60042", "Bob", "192.168.2.122", 60042, "online")
+    assert widget.list_widget.count() == 2, "Bob bị nhân bản bởi cổng tạm thời (ephemeral port)!"
+
+    # Kiểm tra danh sách chỉ gồm đúng 2 người: AliceTest và Bob
+    peers = [name for pid, name in widget.get_all_peers()]
+    assert len(peers) == 2
+    assert "AliceTest" in peers
+    assert "Bob" in peers
+
+
+def test_file_recall_and_delete_feature(tmp_path):
+    """Kiểm tra chức năng thu hồi file gửi nhầm và xóa file đã nhận khỏi ổ đĩa."""
+    from shared.protocol import make_file_delete_header
+    from shared.validator import validate_header
+    from p2p_node.transfer_manager import TransferManager
+    from security.crypto_manager import CryptoManager
+
+    # 1. Kiểm tra cấu trúc header gói tin file_delete
+    h = make_file_delete_header("Alice", "test_doc.pptx", file_id="task_123")
+    is_valid, err = validate_header(h)
+    assert is_valid, f"Header file_delete không hợp lệ: {err}"
+    assert h["type"] == "file_delete"
+    assert h["file_name"] == "test_doc.pptx"
+
+    # 2. Giả lập file tồn tại trong thư mục tải về của Receiver
+    download_dir = str(tmp_path / "received")
+    os.makedirs(download_dir, exist_ok=True)
+    fake_file = os.path.join(download_dir, "test_doc.pptx")
+    with open(fake_file, "wb") as f:
+        f.write(b"Slide presentation content")
+    assert os.path.exists(fake_file)
+
+    # 3. Khi nhận yêu cầu thu hồi / xóa -> xóa sạch file vật lý
+    crypto_mgr = CryptoManager()
+    mgr = TransferManager(crypto_mgr, download_dir=download_dir, listen_port=9001)
+    deleted = mgr.delete_transferred_file("test_doc.pptx", file_id="task_123")
+    assert deleted is True
+    assert not os.path.exists(fake_file), "File vẫn còn tồn tại sau khi bị thu hồi!"
+
+
 def test_peer_deduplication_config_dialog_and_handshake(qapp):
     """Kiểm tra luồng kết nối nhập IP -> placeholder -> Handshake -> UDP Discovery không làm nhân bản Peer trên UI."""
     port_a = _get_free_port()

@@ -24,11 +24,11 @@ from p2p_node.handler import MessageHandler
 from p2p_node.listener import P2PListener
 from p2p_node.discovery import PeerDiscovery
 from p2p_node.transfer_manager import TransferManager
-from p2p_node.transfer_task import TransferTask, TransferStatus
+from p2p_node.transfer_task import TransferTask, TransferStatus, TransferDirection
 from p2p_node.sender import send_message_direct, send_message_direct_async, PeerSocketClient
 from shared.protocol import (
     make_handshake_header, make_handshake_ack_header,
-    make_key_exchange_header, make_chat_header, pack_message
+    make_key_exchange_header, make_chat_header, make_file_delete_header, pack_message
 )
 from ui.peer_list_widget import PeerListWidget, is_same_host
 from ui.chat_widgets import (
@@ -82,6 +82,7 @@ class MainWindow(QMainWindow):
         self._peer_info_map: dict[str, dict] = {}  # {peer_id: {ip, port, username, status}}
         self._peer_clients: dict[str, PeerSocketClient] = {}
         self._file_row_widgets: dict[str, FileRowWidget] = {}
+        self._last_sent_file: Optional[dict] = None
 
         # 4. Xây dựng giao diện
         self._setup_ui()
@@ -143,11 +144,16 @@ class MainWindow(QMainWindow):
         name_layout.addWidget(self.header_status_label)
         h_layout.addLayout(name_layout, 1)
 
-        # Nút gửi file nhanh trên header
+        # Nút gửi file và mở thư mục lưu trữ trên header
         self.header_attach_btn = QPushButton("📎 Gửi File...")
         self.header_attach_btn.setEnabled(False)
         self.header_attach_btn.clicked.connect(self._open_file_picker)
         h_layout.addWidget(self.header_attach_btn)
+
+        self.header_open_folder_btn = QPushButton("📂 Thư Mục File")
+        self.header_open_folder_btn.setToolTip("Mở thư mục chứa các file đã nhận (received_files)")
+        self.header_open_folder_btn.clicked.connect(self._open_received_files_folder)
+        h_layout.addWidget(self.header_open_folder_btn)
         layout.addWidget(self.chat_header)
 
         # 2. Khung chứa danh sách dòng tiến trình truyền file (File Row Container)
@@ -228,6 +234,11 @@ class MainWindow(QMainWindow):
         conn_act.triggered.connect(self._show_config_dialog)
         file_menu.addAction(conn_act)
 
+        open_folder_act = QAction("📁 Mở Thư Mục File Đã Nhận", self)
+        open_folder_act.setShortcut("Ctrl+O")
+        open_folder_act.triggered.connect(self._open_received_files_folder)
+        file_menu.addAction(open_folder_act)
+
         file_menu.addSeparator()
         exit_act = QAction("Thoát", self)
         exit_act.triggered.connect(self.close)
@@ -262,6 +273,7 @@ class MainWindow(QMainWindow):
         self.msg_handler.file_start_received.connect(self.transfer_mgr.handle_file_start)
         self.msg_handler.file_chunk_received.connect(self.transfer_mgr.handle_file_chunk)
         self.msg_handler.file_cancel_received.connect(self.transfer_mgr.cancel_task)
+        self.msg_handler.file_delete_received.connect(self._on_file_delete_received)
 
         # Transfer Manager
         self.transfer_mgr.task_added.connect(self._on_file_task_added)
@@ -322,29 +334,47 @@ class MainWindow(QMainWindow):
         safe_name = self._sanitize_username(username)
         canonical_peer_id = f"{ip}:{port}"
 
-        # Chống nhân bản: Kiểm tra xem đã có mục nào đại diện cho Peer này chưa (canonical_id hoặc cùng port)
+        # Chống nhân bản: Kiểm tra xem đã có mục nào đại diện cho Peer này chưa
         found_pid = None
-        for existing_pid, info in self._peer_info_map.items():
+        is_real_name = bool(safe_name and not safe_name.startswith("Peer_"))
+
+        for existing_pid, info in list(self._peer_info_map.items()):
             if existing_pid == canonical_peer_id:
                 found_pid = existing_pid
                 break
-            if info.get("port") == port:
-                same_host = is_same_host(info.get("ip", ""), ip)
-                same_name = (info.get("username", "").lower() == safe_name.lower())
-                is_placeholder = info.get("username", "").startswith("Peer_") or safe_name.startswith("Peer_")
-                if same_host or same_name or is_placeholder:
-                    found_pid = existing_pid
-                    break
+            same_host = is_same_host(info.get("ip", ""), ip)
+            existing_name = info.get("username", "")
+            is_info_real_name = bool(existing_name and not existing_name.startswith("Peer_"))
+            same_real_name = is_real_name and is_info_real_name and (existing_name.lower() == safe_name.lower())
+            same_port = (port > 0 and info.get("port") == port)
+            is_placeholder = existing_name.startswith("Peer_") or safe_name.startswith("Peer_")
+
+            if same_real_name or (same_port and (same_host or is_placeholder)):
+                found_pid = existing_pid
+                break
 
         if found_pid:
             self._peer_info_map[found_pid]["status"] = "online"
-            if self._peer_info_map[found_pid].get("username", "").startswith("Peer_"):
+            self._peer_info_map[found_pid]["port"] = port
+            self._peer_info_map[found_pid]["ip"] = ip
+            if self._peer_info_map[found_pid].get("username", "").startswith("Peer_") or is_real_name:
                 self._peer_info_map[found_pid]["username"] = safe_name
             current_name = self._peer_info_map[found_pid]["username"]
             current_ip = self._peer_info_map[found_pid]["ip"]
             current_avatar = self._peer_info_map[found_pid].get("avatar_path", "")
             if canonical_peer_id != found_pid:
                 self._peer_info_map[canonical_peer_id] = self._peer_info_map[found_pid]
+                if found_pid in self._message_models:
+                    self._message_models[canonical_peer_id] = self._message_models[found_pid]
+
+            # Dọn dẹp các mục cũ trùng lặp trong cache thông tin peer
+            if is_real_name:
+                for other_pid, other_info in list(self._peer_info_map.items()):
+                    if other_pid not in (found_pid, canonical_peer_id):
+                        if other_info.get("username", "").lower() == safe_name.lower():
+                            if other_info.get("status") == "offline" or is_same_host(other_info.get("ip", ""), ip):
+                                self._peer_info_map.pop(other_pid, None)
+
             self.peer_list_panel.add_or_update_peer(found_pid, current_name, current_ip, port, "online", current_avatar)
             if not self.crypto_mgr.has_session_key(found_pid):
                 self._send_handshake(found_pid, current_ip, port)
@@ -513,17 +543,22 @@ class MainWindow(QMainWindow):
 
         # Chống nhân bản: Kiểm tra xem đã có mục nào trong _peer_info_map đại diện cho Peer này chưa
         target_pid = canonical_peer_id
-        for existing_pid, info in self._peer_info_map.items():
+        is_real_name = bool(safe_username and not safe_username.startswith("Peer_"))
+
+        for existing_pid, info in list(self._peer_info_map.items()):
             if existing_pid == canonical_peer_id:
                 target_pid = existing_pid
                 break
-            if info.get("port") == actual_port:
-                same_host = is_same_host(info.get("ip", ""), ip)
-                same_name = (info.get("username", "").lower() == safe_username.lower())
-                is_placeholder = info.get("username", "").startswith("Peer_") or safe_username.startswith("Peer_")
-                if same_host or same_name or is_placeholder:
-                    target_pid = existing_pid
-                    break
+            same_host = is_same_host(info.get("ip", ""), ip)
+            existing_name = info.get("username", "")
+            is_info_real_name = bool(existing_name and not existing_name.startswith("Peer_"))
+            same_real_name = is_real_name and is_info_real_name and (existing_name.lower() == safe_username.lower())
+            same_port = (actual_port > 0 and info.get("port") == actual_port)
+            is_placeholder = existing_name.startswith("Peer_") or safe_username.startswith("Peer_")
+
+            if same_real_name or (same_port and (same_host or is_placeholder)):
+                target_pid = existing_pid
+                break
 
         if pub_key:
             self.crypto_mgr.register_peer_public_key(target_pid, pub_key)
@@ -542,6 +577,17 @@ class MainWindow(QMainWindow):
         self._peer_info_map[target_pid] = info_dict
         if canonical_peer_id != target_pid:
             self._peer_info_map[canonical_peer_id] = info_dict
+            if target_pid in self._message_models:
+                self._message_models[canonical_peer_id] = self._message_models[target_pid]
+
+        # Dọn dẹp bất kỳ mục trùng lặp nào khác cùng tên thật
+        if is_real_name:
+            for other_pid, other_info in list(self._peer_info_map.items()):
+                if other_pid not in (target_pid, canonical_peer_id):
+                    if other_info.get("username", "").lower() == safe_username.lower():
+                        if other_info.get("status") == "offline" or is_same_host(other_info.get("ip", ""), ip):
+                            self._peer_info_map.pop(other_pid, None)
+
         self.peer_list_panel.add_or_update_peer(target_pid, safe_username, dest_ip, actual_port, "online", final_avatar)
 
         if self._current_peer_id == target_pid:
@@ -756,14 +802,40 @@ class MainWindow(QMainWindow):
         port = info["port"]
         task_id = self.transfer_mgr.start_send_file(self._current_peer_id, ip, port, file_path)
         if task_id:
+            self._last_sent_file = {
+                "file_name": os.path.basename(file_path),
+                "task_id": task_id,
+                "peer_id": self._current_peer_id
+            }
             self._add_system_message(self._current_peer_id, f"📤 Đang gửi file: {os.path.basename(file_path)}...")
 
     def _on_file_task_added(self, task: TransferTask):
+        # Chuẩn hóa task.peer_id về Canonical ID để tin nhắn và tiến độ vào đúng khung chat
+        canonical_pid = self._find_canonical_peer_id(
+            task.peer_id,
+            getattr(task, "sender_name", ""),
+            getattr(task, "sender_port", 0)
+        )
+        if canonical_pid:
+            task.peer_id = canonical_pid
+
         widget = FileRowWidget(task, self.file_container)
         widget.cancel_requested.connect(self.transfer_mgr.cancel_task)
+        widget.delete_requested.connect(self._on_file_delete_requested)
         self._file_row_widgets[task.task_id] = widget
         self.file_container_layout.addWidget(widget)
         self.file_container.setVisible(True)
+
+        # Thông báo nhận file rõ ràng cho người nhận
+        is_download = (task.direction == TransferDirection.DOWNLOAD) or (getattr(task.direction, "value", "") == "download")
+        if is_download:
+            sender = getattr(task, "sender_name", "") or self._peer_info_map.get(task.peer_id, {}).get("username", "Đối phương")
+            self._add_system_message(
+                task.peer_id,
+                f"📥 Đang nhận file: '{task.file_name}' ({task.size_str}) từ {sender}..."
+            )
+            self.statusBar().showMessage(f"📥 Đang nhận file '{task.file_name}' từ {sender}...", 8000)
+            self.peer_list_panel.update_last_message(task.peer_id, f"📥 Nhận file: {task.file_name}")
 
     def _on_file_task_progress(self, task: TransferTask):
         if not task:
@@ -779,24 +851,60 @@ class MainWindow(QMainWindow):
         if not task:
             return
         try:
+            canonical_pid = self._find_canonical_peer_id(
+                task.peer_id,
+                getattr(task, "sender_name", ""),
+                getattr(task, "sender_port", 0)
+            )
+            if canonical_pid:
+                task.peer_id = canonical_pid
+
             w = self._file_row_widgets.get(task.task_id)
             if w:
                 w.update_task(task)
             act = "Đã gửi" if task.direction.value == "upload" else "Đã nhận"
-            self._add_system_message(task.peer_id, f"✅ {act} file '{task.file_name}' thành công!")
-            QTimer.singleShot(8000, lambda tid=task.task_id: self._remove_file_row(tid))
+            tip = "(Có thể bấm '🗑️ Thu Hồi' nếu gửi nhầm)" if task.direction.value == "upload" else "(Lưu tại: received_files)"
+            self._add_system_message(task.peer_id, f"✅ {act} file '{task.file_name}' thành công! {tip}")
+            self.peer_list_panel.update_last_message(task.peer_id, f"✅ {act}: {task.file_name}")
+            self.statusBar().showMessage(f"✅ {act} file '{task.file_name}' thành công!", 8000)
+            # Giữ widget tiến độ 30 giây để người dùng bấm nút [📂 Mở File], [📁 Thư Mục] hoặc [🗑️ Thu Hồi]
+            QTimer.singleShot(30000, lambda tid=task.task_id: self._remove_file_row(tid))
         except Exception as e:
             log.warning(f"Lỗi hoàn thành task file: {e}")
+
+    def _open_received_files_folder(self):
+        """Mở thư mục chứa file đã nhận trong Windows File Explorer."""
+        folder = getattr(config, "download_dir", "")
+        if not folder or not os.path.exists(folder):
+            folder = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "received_files")
+        os.makedirs(folder, exist_ok=True)
+        try:
+            os.startfile(folder)
+        except Exception as e:
+            QMessageBox.information(
+                self,
+                "Thư Mục Lưu File",
+                f"Đường dẫn thư mục nhận file:\n{folder}\n\nLỗi mở tự động: {e}"
+            )
 
     def _on_file_task_failed(self, task: TransferTask):
         if not task:
             return
         try:
+            canonical_pid = self._find_canonical_peer_id(
+                task.peer_id,
+                getattr(task, "sender_name", ""),
+                getattr(task, "sender_port", 0)
+            )
+            if canonical_pid:
+                task.peer_id = canonical_pid
+
             w = self._file_row_widgets.get(task.task_id)
             if w:
                 w.update_task(task)
             err_msg = task.error_msg or "Lỗi không xác định"
             self._add_system_message(task.peer_id, f"❌ Truyền file '{task.file_name}' thất bại: {err_msg}")
+            self.statusBar().showMessage(f"❌ Truyền file '{task.file_name}' thất bại: {err_msg}", 8000)
             QTimer.singleShot(8000, lambda tid=task.task_id: self._remove_file_row(tid))
         except Exception as e:
             log.warning(f"Lỗi thất bại task file: {e}")
@@ -807,6 +915,73 @@ class MainWindow(QMainWindow):
             w.deleteLater()
         if not self._file_row_widgets:
             self.file_container.setVisible(False)
+
+    def _on_file_delete_requested(self, task_id: str, file_name: str, direction_val: str):
+        """Xử lý khi người dùng bấm nút [🗑️ Thu Hồi] hoặc [🗑️ Xóa File]."""
+        if direction_val == "upload":
+            # Bên gửi muốn thu hồi file gửi nhầm
+            reply = QMessageBox.question(
+                self,
+                "Xác Nhận Thu Hồi File",
+                f"Bạn có chắc chắn muốn thu hồi file:\n'{file_name}'?\n\nFile này sẽ được tự động xóa khỏi máy của đối phương.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+            # Gửi gói tin file_delete sang cho đối phương
+            if self._current_peer_id:
+                info = self._peer_info_map.get(self._current_peer_id)
+                if info and info.get("status") == "online":
+                    ip = info["ip"]
+                    port = info["port"]
+                    h = make_file_delete_header(self.username, file_name, file_id=task_id)
+                    send_message_direct_async(ip, port, h)
+
+            self.transfer_mgr.delete_transferred_file(file_name, task_id)
+            w = self._file_row_widgets.get(task_id)
+            if w:
+                w.mark_deleted(f"Đã thu hồi '{file_name}'")
+            self._add_system_message(self._current_peer_id, f"🗑️ Bạn đã thu hồi file '{file_name}' thành công.")
+            QTimer.singleShot(5000, lambda tid=task_id: self._remove_file_row(tid))
+
+        else:
+            # Bên nhận muốn xóa file khỏi máy
+            reply = QMessageBox.question(
+                self,
+                "Xác Nhận Xóa File",
+                f"Bạn có muốn xóa file '{file_name}' khỏi thư mục nhận (received_files) không?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+            self.transfer_mgr.delete_transferred_file(file_name, task_id)
+            w = self._file_row_widgets.get(task_id)
+            if w:
+                w.mark_deleted(f"Đã xóa '{file_name}' khỏi máy")
+            self._add_system_message(self._current_peer_id, f"🗑️ Đã xóa file '{file_name}' khỏi thư mục nhận.")
+            QTimer.singleShot(5000, lambda tid=task_id: self._remove_file_row(tid))
+
+    def _on_file_delete_received(self, peer_id: str, header: dict):
+        """Xử lý khi đối phương gửi yêu cầu thu hồi / xóa file."""
+        file_name = header.get("file_name", "")
+        file_id = header.get("file_id", "")
+        sender = header.get("sender", "Đối phương")
+
+        # Tự động xóa file vật lý khỏi thư mục download
+        self.transfer_mgr.delete_transferred_file(file_name, file_id)
+
+        # Cập nhật widget tiến độ nếu còn hiển thị
+        if file_id and file_id in self._file_row_widgets:
+            w = self._file_row_widgets[file_id]
+            w.mark_deleted(f"{sender} đã thu hồi file")
+            QTimer.singleShot(6000, lambda tid=file_id: self._remove_file_row(tid))
+
+        msg = f"⚠️ {sender} đã thu hồi file '{file_name}' (Đã tự động xóa khỏi thư mục received_files)."
+        self._add_system_message(peer_id, msg)
 
     # ========================== CONTEXT MENU (REPLY & FORWARD) ==========================
 
@@ -826,6 +1001,9 @@ class MainWindow(QMainWindow):
         reply_act = menu.addAction("↩ Trả lời (Reply)")
         fwd_act = menu.addAction("↪ Chuyển tiếp (Forward)")
         copy_act = menu.addAction("📋 Sao chép")
+        menu.addSeparator()
+        folder_act = menu.addAction("📂 Mở thư mục file đã nhận")
+        recall_act = menu.addAction("🗑️ Thu hồi file vừa gửi gần nhất")
 
         action = menu.exec(self.message_view.viewport().mapToGlobal(pos))
         if action == reply_act:
@@ -835,6 +1013,17 @@ class MainWindow(QMainWindow):
             self._trigger_forward(msg)
         elif action == copy_act:
             QApplication.clipboard().setText(msg.content)
+        elif action == folder_act:
+            self._open_received_files_folder()
+        elif action == recall_act:
+            if self._last_sent_file and self._last_sent_file.get("peer_id") == self._current_peer_id:
+                self._on_file_delete_requested(
+                    self._last_sent_file["task_id"],
+                    self._last_sent_file["file_name"],
+                    "upload"
+                )
+            else:
+                QMessageBox.information(self, "Thu Hồi File", "Không tìm thấy file nào vừa được gửi tới Peer này.")
 
     def _trigger_forward(self, msg: MessageData):
         peers = self.peer_list_panel.get_all_peers(online_only=True)

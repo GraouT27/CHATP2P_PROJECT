@@ -14,6 +14,7 @@ VALID_TYPES = {
     "handshake", "handshake_ack", "key_exchange",
     "chat", "avatar_sync",
     "file_start", "file_chunk", "file_ack", "file_cancel",
+    "file_delete",
     "ping", "pong"
 }
 
@@ -108,6 +109,10 @@ def validate_header(header: dict) -> Tuple[bool, str]:
             return False, "Chỉ số chunk hoặc kích thước chunk phải là số nguyên"
         if header["chunk_index"] < 0 or header["chunk_size"] < 0:
             return False, "Chỉ số chunk hoặc kích thước chunk không hợp lệ"
+
+    elif msg_type == "file_delete":
+        if "file_name" not in header or not isinstance(header["file_name"], str) or not header["file_name"].strip():
+            return False, "file_delete thiếu trường 'file_name' hợp lệ"
 
     return True, "OK"
 

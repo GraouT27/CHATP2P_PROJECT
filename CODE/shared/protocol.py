@@ -185,6 +185,19 @@ def make_file_cancel_header(username: str, file_id: str, reason: str = "") -> di
     }
 
 
+def make_file_delete_header(username: str, file_name: str, file_id: str = "", reason: str = "") -> dict:
+    """Tạo header yêu cầu xóa / thu hồi file đã gửi sang đối phương."""
+    return {
+        "msg_id": str(uuid.uuid4()),
+        "type": "file_delete",
+        "sender": username,
+        "file_name": file_name,
+        "file_id": file_id,
+        "reason": reason,
+        "timestamp": time.time(),
+    }
+
+
 def make_ping_header(username: str) -> dict:
     return {
         "msg_id": str(uuid.uuid4()),

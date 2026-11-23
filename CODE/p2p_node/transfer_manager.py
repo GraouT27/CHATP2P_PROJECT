@@ -35,7 +35,7 @@ class FileSenderThread(QThread):
 
     def __init__(self, task: TransferTask, target_ip: str, target_port: int,
                  crypto_mgr: CryptoManager, semaphore: threading.Semaphore,
-                 listen_port: int = 0, parent=None):
+                 listen_port: int = 0, sender_username: str = "User", parent=None):
         super().__init__(parent)
         self.task = task
         self.target_ip = target_ip
@@ -43,6 +43,7 @@ class FileSenderThread(QThread):
         self.crypto_mgr = crypto_mgr
         self.semaphore = semaphore
         self.listen_port = listen_port
+        self.sender_username = sender_username or "User"
 
     def run(self):
         # Chờ Semaphore cho phép chạy trong giới hạn đồng thời
@@ -66,7 +67,7 @@ class FileSenderThread(QThread):
 
             # 3. Gửi gói tin file_start
             start_header = make_file_start_header(
-                username=self.crypto_mgr._peer_session_keys.get(self.task.peer_id, "User") and "User" or "User",
+                username=self.sender_username,
                 file_id=self.task.task_id,
                 file_name=self.task.file_name,
                 file_size=self.task.file_size,
@@ -193,9 +194,15 @@ class TransferManager(QObject):
         if not my_port:
             my_port = getattr(config, "listen_port", 0)
 
+        my_user = getattr(self, "username", "")
+        if not my_user and self.parent():
+            my_user = getattr(self.parent(), "username", "")
+        if not my_user:
+            my_user = getattr(config, "username", "User")
+
         worker = FileSenderThread(
             task, ip, port, self.crypto_mgr, self.semaphore,
-            listen_port=my_port,
+            listen_port=my_port, sender_username=my_user,
             parent=self
         )
         worker.task_progress.connect(lambda tid: self.tasks.get(tid) and self.task_progress.emit(self.tasks.get(tid)))
@@ -221,6 +228,9 @@ class TransferManager(QObject):
         # Xóa file tạm cũ nếu có
         remove_temp_file(temp_path)
 
+        sender_name = header.get("sender", "")
+        sender_port = header.get("sender_port", 0)
+
         task = TransferTask(
             task_id=file_id,
             peer_id=peer_id,
@@ -230,6 +240,8 @@ class TransferManager(QObject):
             total_chunks=total_chunks,
             file_hash=file_hash,
         )
+        task.sender_name = sender_name
+        task.sender_port = sender_port
         task.temp_path = temp_path
         task.final_path = final_path
         task.status = TransferStatus.TRANSFERRING
@@ -356,3 +368,44 @@ class TransferManager(QObject):
                         pass
                     task._file_handle = None
                 self.cancel_task(tid)
+
+    def delete_transferred_file(self, file_name: str, file_id: str = "") -> bool:
+        """
+        Xóa file đã tải về hoặc đang tải (khi đối phương thu hồi hoặc người dùng xóa).
+        Đảm bảo đóng an toàn file handle và xóa file vật lý khỏi đĩa.
+        """
+        deleted = False
+
+        # 1. Hủy và xóa task trong bộ nhớ nếu đang chạy
+        if file_id and file_id in self.tasks:
+            task = self.tasks[file_id]
+            task.abort("Đã thu hồi / xóa")
+            if getattr(task, "_file_handle", None) and not task._file_handle.closed:
+                try:
+                    task._file_handle.close()
+                except Exception:
+                    pass
+                task._file_handle = None
+            if getattr(task, "temp_path", None) and os.path.exists(task.temp_path):
+                remove_temp_file(task.temp_path)
+                deleted = True
+            if getattr(task, "final_path", None) and os.path.exists(task.final_path):
+                try:
+                    os.remove(task.final_path)
+                    deleted = True
+                except Exception:
+                    pass
+
+        # 2. Xóa file vật lý trong thư mục download_dir
+        if file_name:
+            safe_name = os.path.basename(file_name)
+            target = os.path.join(self.download_dir, safe_name)
+            if os.path.exists(target):
+                try:
+                    os.remove(target)
+                    deleted = True
+                    log.info(f"Đã xóa file '{safe_name}' khỏi {self.download_dir}")
+                except Exception as e:
+                    log.warning(f"Không thể xóa file {target}: {e}")
+
+        return deleted
