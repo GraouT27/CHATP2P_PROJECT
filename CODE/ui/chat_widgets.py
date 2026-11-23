@@ -19,6 +19,9 @@ from PyQt6.QtWidgets import (
 
 # ========================== AVATAR WIDGET ==========================
 
+_AVATAR_CACHE: dict[tuple[str, int], QPixmap] = {}
+
+
 class AvatarWidget(QLabel):
     """
     Hiển thị Avatar hình tròn sử dụng QPixmap.
@@ -53,8 +56,13 @@ class AvatarWidget(QLabel):
         # setClipPath cắt bỏ mọi pixel vẽ ra ngoài hình tròn, tạo hiệu ứng Avatar bo tròn mượt.
         painter.setClipPath(path)
 
-        # 1. Nếu có file ảnh avatar hợp lệ
+        # 1. Nếu có file ảnh avatar hợp lệ (sử dụng bộ nhớ cache để cuộn danh sách và hiển thị tin nhắn mượt 60 FPS)
         if self._image_path and os.path.exists(self._image_path):
+            cache_key = (self._image_path, self._size)
+            if cache_key in _AVATAR_CACHE and not _AVATAR_CACHE[cache_key].isNull():
+                self.setPixmap(_AVATAR_CACHE[cache_key])
+                return
+
             img = QPixmap(self._image_path)
             if not img.isNull():
                 scaled = img.scaled(
@@ -66,6 +74,7 @@ class AvatarWidget(QLabel):
                 y = (scaled.height() - self._size) // 2
                 painter.drawPixmap(0, 0, scaled, x, y, self._size, self._size)
                 painter.end()
+                _AVATAR_CACHE[cache_key] = pixmap
                 self.setPixmap(pixmap)
                 return
 
