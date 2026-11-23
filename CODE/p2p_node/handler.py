@@ -25,6 +25,7 @@ class MessageHandler(QObject):
     file_start_received = pyqtSignal(str, dict)                   # (peer_id, header)
     file_chunk_received = pyqtSignal(str, dict, bytes)            # (peer_id, header, chunk_data)
     file_cancel_received = pyqtSignal(str, str)                   # (peer_id, file_id)
+    file_delete_received = pyqtSignal(str, dict)                  # (peer_id, header)
 
     def __init__(self, crypto_mgr: CryptoManager = None, parent=None):
         super().__init__(parent)
@@ -214,3 +215,9 @@ class MessageHandler(QObject):
             file_id = header.get("file_id")
             log.warning(f"Peer {peer_id} đã hủy truyền file {file_id}")
             self.file_cancel_received.emit(peer_id, file_id)
+
+        # 8. Gói tin Thu hồi / Xóa file (file_delete)
+        elif msg_type == "file_delete":
+            file_name = header.get("file_name")
+            log.warning(f"Peer {peer_id} đã thu hồi/yêu cầu xóa file '{file_name}'")
+            self.file_delete_received.emit(peer_id, header)

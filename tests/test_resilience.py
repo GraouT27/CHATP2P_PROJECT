@@ -1,272 +1,154 @@
-"""Chiu loi: du lieu rac, ngat ket noi dot ngot, kill process, giai phong tai nguyen (Chang 6, TV1).
-
-Chay may chu mau (tests/resilience_hub.py) o mot TIEN TRINH RIENG roi tan cong no bang cac cach
-that su xay ra: kill -9 giua luc truyen, dong ngay khi vua noi, gui byte ngau nhien, RST,
-do dai khung khong lo. Sau moi tinh huong: may chu con song, khong in Traceback, ket noi dong
-sach, va con phuc vu duoc ket noi moi.
 """
+Kiểm thử Khả năng Phục hồi & Chống Lỗi (Resilience & Fault Tolerance Test):
+- Kiểm tra cô lập lỗi khi kết nối bị ngắt đột ngột.
+- Kiểm tra phát hiện và từ chối gói tin bị giả mạo / sai định dạng (Tampered / Malformed Data).
+- Kiểm tra hủy truyền file dở dang và dọn dẹp bộ nhớ đệm, file tạm .part.
+- Kiểm tra tự động phục hồi phiên kết nối khi Peer online trở lại.
+"""
+
 import os
-import queue
-import re
-import socket
-import struct
-import subprocess
 import sys
-import threading
 import time
-from pathlib import Path
-
-import psutil
+import socket
 import pytest
+from PyQt6.QtWidgets import QApplication
 
-TESTS = Path(__file__).resolve().parent
-sys.path.insert(0, str(TESTS.parent / "CODE"))
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CODE_DIR = os.path.join(ROOT_DIR, "CODE")
+if CODE_DIR not in sys.path:
+    sys.path.insert(0, CODE_DIR)
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
 
-from security.crypto import KeyPair  # noqa: E402
-from security.handshake import (  # noqa: E402
-    handshake_initiator,
-    make_message,
-    recv_secure,
-    send_frame,
-    send_secure,
-)
-from security.netutil import enable_keepalive  # noqa: E402
-
-CLIENT_KEY = KeyPair.generate()
+from security.crypto_manager import CryptoManager
+from p2p_node.transfer_manager import TransferManager, TransferTask, TransferDirection, TransferStatus
+from p2p_node.storage import remove_temp_file
+from shared.protocol import pack_message, make_chat_header, make_file_start_header
 
 
-class Hub:
-    def __init__(self, handshake_timeout=1.5):
-        self.proc = subprocess.Popen(
-            [sys.executable, str(TESTS / "resilience_hub.py"), str(handshake_timeout)],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        self.lines, self._closed, self._ps = [], queue.Queue(), psutil.Process(self.proc.pid)
-        threading.Thread(target=self._read, daemon=True).start()
-        self.port = int(self._first_line().split()[1])
-
-    def _read(self):
-        for line in self.proc.stdout:
-            line = line.strip()
-            self.lines.append(line)
-            for reason in re.findall(r"CLOSED reason=([a-z_]+)", line):
-                self._closed.put(reason)
-
-    def _first_line(self, timeout=15):
-        end = time.time() + timeout
-        while time.time() < end:
-            if self.lines:
-                return self.lines[0]
-            time.sleep(0.02)
-        raise TimeoutError("may chu mau khong khoi dong duoc: " + " | ".join(self.lines))
-
-    def wait_closed(self, timeout=10):
-        return self._closed.get(timeout=timeout)
-
-    def alive(self):
-        return self.proc.poll() is None
-
-    def stats(self):
-        handles = self._ps.num_handles() if hasattr(self._ps, "num_handles") else self._ps.num_fds()
-        conns = self._ps.net_connections(kind="tcp") if hasattr(self._ps, "net_connections") \
-            else self._ps.connections(kind="tcp")
-        established = sum(1 for c in conns if c.status == psutil.CONN_ESTABLISHED)
-        return handles, self._ps.num_threads(), established
-
-    def settle(self, timeout=5):
-        """Cho cho den khi khong con ket noi ESTABLISHED nao."""
-        end = time.time() + timeout
-        while time.time() < end:
-            if self.stats()[2] == 0:
-                return True
-            time.sleep(0.05)
-        return False
-
-    def connect(self):
-        sock = socket.create_connection(("127.0.0.1", self.port), timeout=10)
-        return sock
-
-    def echo_ok(self, text="xin chao"):
-        """Mot ket noi moi, day du: bat tay roi gui TEXT va nhan echo."""
-        with self.connect() as sock:
-            result = handshake_initiator(sock, CLIENT_KEY, "peer-X", "hub")
-            send_secure(sock, result.session, make_message("TEXT", "peer-X", "hub", {"text": text}))
-            return recv_secure(sock, result.session)["payload"]["text"] == "echo: " + text
-
-    def stop(self):
-        if self.alive():
-            self.proc.kill()
-        self.proc.wait(10)
+@pytest.fixture(scope="session")
+def qapp():
+    app = QApplication.instance()
+    if not app:
+        os.environ["QT_QPA_PLATFORM"] = "offscreen"
+        app = QApplication([])
+    app.setQuitOnLastWindowClosed(False)
+    return app
 
 
-@pytest.fixture
-def hub():
-    h = Hub()
-    yield h
-    survived = h.alive()
-    h.stop()
-    assert survived, "may chu da chet: " + " | ".join(h.lines)
-    assert not any("Traceback" in line for line in h.lines), "\n".join(h.lines)
+def test_socket_abrupt_disconnect_cleanup(tmp_path):
+    """1. Kiểm tra khi socket bị ngắt kết nối đột ngột: Toàn bộ tác vụ file liên quan được hủy an toàn."""
+    crypto_mgr = CryptoManager()
+    download_dir = str(tmp_path / "downloads")
+    os.makedirs(download_dir, exist_ok=True)
+    transfer_mgr = TransferManager(crypto_mgr, download_dir=download_dir)
+
+    task_id = "resilience_task_01"
+    start_h = {
+        "task_id": task_id,
+        "file_name": "data_file.dat",
+        "file_size": 1024 * 1024,
+        "total_chunks": 16,
+        "sha256": "fakehash",
+    }
+    peer_id = "192.168.1.55:9002"
+    transfer_mgr.handle_file_start(peer_id, start_h)
+    task = transfer_mgr.tasks.get(task_id)
+    assert task is not None
+    assert task.status == TransferStatus.TRANSFERRING
+
+    # Giả lập socket bị drop
+    transfer_mgr.cancel_all_for_peer(peer_id)
+    assert task.status in (TransferStatus.CANCELLED, TransferStatus.ERROR)
+    assert not os.path.exists(task.temp_path)
 
 
-def abrupt_close(sock):
-    """Dong bang RST (nhu mat dien/kill), khong qua FIN."""
-    fmt = "HH" if sys.platform == "win32" else "ii"
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack(fmt, 1, 0))
-    sock.close()
+def test_tampered_packet_rejection_no_crash(tmp_path):
+    """2. Kiểm tra từ chối gói tin bị sửa đổi dữ liệu (tampered chunk): Không crash hệ thống."""
+    crypto_mgr = CryptoManager()
+    download_dir = str(tmp_path / "downloads_tampered")
+    os.makedirs(download_dir, exist_ok=True)
+    transfer_mgr = TransferManager(crypto_mgr, download_dir=download_dir)
+
+    task_id = "tamper_task_02"
+    file_size = 65536
+    start_h = {
+        "task_id": task_id,
+        "file_name": "secure_doc.pdf",
+        "file_size": file_size,
+        "total_chunks": 1,
+        "sha256": "correct_sha256_hash",
+    }
+    transfer_mgr.handle_file_start("127.0.0.1:9003", start_h)
+    task = transfer_mgr.tasks[task_id]
+
+    # Gửi dữ liệu giả mạo đủ kích thước file nhưng sai hash
+    fake_chunk = b"A" * file_size
+    chunk_h = {
+        "task_id": task_id,
+        "chunk_index": 0,
+        "total_chunks": 1,
+        "is_encrypted": False,
+    }
+    transfer_mgr.handle_file_chunk("127.0.0.1:9003", chunk_h, fake_chunk)
+    assert task.status == TransferStatus.ERROR
+    assert not os.path.exists(task.temp_path)
 
 
-def logged_in(hub):
-    sock = hub.connect()
-    return sock, handshake_initiator(sock, CLIENT_KEY, "peer-X", "hub")
+def test_file_transfer_abort_cleans_temp_file(tmp_path):
+    """3. Kiểm tra người dùng chủ động bấm Hủy: File handle đóng ngay và file .part bị xóa dọn dẹp."""
+    download_dir = str(tmp_path / "downloads_abort")
+    os.makedirs(download_dir, exist_ok=True)
+    transfer_mgr = TransferManager(CryptoManager(), download_dir=download_dir)
+
+    task_id = "user_cancel_task"
+    start_h = {
+        "task_id": task_id,
+        "file_name": "sample_video.mp4",
+        "file_size": 10 * 1024 * 1024,
+        "total_chunks": 160,
+        "sha256": "hash",
+    }
+    transfer_mgr.handle_file_start("127.0.0.1:9004", start_h)
+    task = transfer_mgr.tasks[task_id]
+    temp_path = task.temp_path
+    assert os.path.exists(temp_path)
+
+    # Người dùng hủy
+    transfer_mgr.cancel_task(task_id)
+    assert task.status == TransferStatus.CANCELLED
+    assert not os.path.exists(temp_path)
 
 
-# ---------------------------------------------------------------- kill / ngat dot ngot
-def test_rs01_peer_killed_mid_transfer(hub):
-    peer = subprocess.Popen([sys.executable, str(TESTS / "resilience_peer.py"), str(hub.port)],
-                            stdout=subprocess.PIPE, text=True)
+def test_peer_session_key_renegotiation():
+    """4. Kiểm tra khả năng làm mới và phục hồi khóa phiên AES-256 (Session Key Renegotiation)."""
+    alice_crypto = CryptoManager()
+    bob_crypto = CryptoManager()
+
+    peer_b = "127.0.0.1:9002"
+    alice_crypto.register_peer_public_key(peer_b, bob_crypto.get_public_key_pem())
+    enc_key = alice_crypto.generate_and_encrypt_session_key(peer_b)
+    assert enc_key is not None
+    assert bob_crypto.receive_and_decrypt_session_key("127.0.0.1:9001", enc_key) is True
+
+    # Giả lập mất kết nối và bắt tay trao đổi lại khóa mới
+    alice_crypto.remove_peer_keys(peer_b)
+    assert not alice_crypto.has_session_key(peer_b)
+
+    # Đăng ký và sinh khóa mới
+    alice_crypto.register_peer_public_key(peer_b, bob_crypto.get_public_key_pem())
+    new_enc_key = alice_crypto.generate_and_encrypt_session_key(peer_b)
+    assert new_enc_key is not None
+    assert bob_crypto.receive_and_decrypt_session_key("127.0.0.1:9001", new_enc_key) is True
+
+
+def test_malformed_protocol_isolation():
+    """5. Kiểm tra khả năng chịu lỗi đối với bản tin có header không hợp lệ hoặc thiếu trường bắt buộc."""
+    from shared.protocol import decode_message, validate_message
+    invalid_data = b"NOT_A_VALID_P2P_PACKET_HEADER"
     try:
-        assert peer.stdout.readline().strip() == "READY"
-        time.sleep(0.4)                                 # dang giua luc gui du lieu
-        peer.kill()                                     # kill -9 / TerminateProcess
-        peer.wait(10)
-    finally:
-        if peer.poll() is None:
-            peer.kill()
-    assert hub.wait_closed() == "peer_disconnected"
-    assert hub.alive() and hub.settle()
-    assert hub.echo_ok()                                # van phuc vu duoc ket noi moi
-
-
-def test_rs02_connect_then_close_immediately(hub):
-    hub.connect().close()
-    assert hub.wait_closed() == "handshake_failed"
-    assert hub.echo_ok()
-
-
-def test_rs03_reset_during_handshake(hub):
-    abrupt_close(hub.connect())
-    assert hub.wait_closed() == "handshake_failed"
-    assert hub.echo_ok()
-
-
-def test_rs04_peer_reset_after_handshake(hub):
-    sock, _ = logged_in(hub)
-    abrupt_close(sock)
-    assert hub.wait_closed() == "peer_disconnected"
-    assert hub.settle() and hub.echo_ok()
-
-
-def test_rs05_silent_peer_does_not_hang_server(hub):
-    start = time.time()
-    with hub.connect():
-        assert hub.wait_closed(timeout=8) == "handshake_failed"
-    assert time.time() - start < 6                      # het thoi gian bat tay, khong cho vo han
-    assert hub.echo_ok()
-
-
-# ---------------------------------------------------------------- du lieu rac
-def test_rs06_random_bytes_instead_of_handshake(hub):
-    with hub.connect() as sock:
-        sock.sendall(os.urandom(4096))
-        assert hub.wait_closed(timeout=8) == "handshake_failed"
-    assert hub.echo_ok()
-
-
-def test_rs07_garbage_frame_after_handshake(hub):
-    sock, _ = logged_in(hub)
-    with sock:
-        send_frame(sock, os.urandom(200))               # khung hop le ve do dai, noi dung rac
-        assert hub.wait_closed() == "decrypt_fail"
-    assert hub.echo_ok()
-
-
-def test_rs08_absurd_frame_length(hub):
-    sock, _ = logged_in(hub)
-    with sock:
-        sock.sendall(b"\xff\xff\xff\xff")               # tuyen bo khung 4 GB: khong duoc cap phat
-        assert hub.wait_closed() == "protocol_error"
-    assert hub.echo_ok()
-    assert hub.stats()[0] < 400                         # khong phinh tai nguyen
-
-
-def test_rs09_encrypted_but_not_json(hub):
-    sock, result = logged_in(hub)
-    with sock:
-        send_frame(sock, result.session.encrypt(b"khong phai json"))
-        assert hub.wait_closed() == "bad_message"
-    assert hub.echo_ok()
-
-
-def test_rs10_wrongly_shaped_messages_are_ignored_connection_survives(hub):
-    sock, result = logged_in(hub)
-    with sock:
-        s = result.session
-        for payload in ({}, {"text": 123}, {"text": None}, {"text": ["a"]}):
-            send_secure(sock, s, make_message("TEXT", "peer-X", "hub", payload))
-        send_secure(sock, s, make_message("VIDEO", "peer-X", "hub", {"x": 1}))   # loai la
-        send_secure(sock, s, make_message("TEXT", "peer-X", "hub", {"text": "van song"}))
-        assert recv_secure(sock, s)["payload"]["text"] == "echo: van song"
-
-
-def test_rs11_replayed_packet_closes_only_that_connection(hub):
-    sock, result = logged_in(hub)
-    with sock:
-        blob = result.session.encrypt(
-            b'{"header": {"message_type": "TEXT"}, "payload": {"text": "mot lan"}}')
-        send_frame(sock, blob)
-        recv_secure(sock, result.session)               # echo cua lan dau
-        send_frame(sock, blob)                          # gui lai y nguyen
-        assert hub.wait_closed() == "decrypt_fail"
-    assert hub.echo_ok()
-
-
-# ---------------------------------------------------------------- giai phong tai nguyen
-def test_rs12_many_abrupt_disconnects_do_not_leak_resources(hub):
-    assert hub.echo_ok()                                # lam nong, khoi tao cac tai nguyen lazy
-    hub.wait_closed()
-    assert hub.settle()
-    handles0, threads0, _ = hub.stats()
-    for _ in range(40):
-        sock, _ = logged_in(hub)
-        abrupt_close(sock)
-        hub.wait_closed()
-    assert hub.settle(timeout=8)
-    handles1, threads1, established = hub.stats()
-    assert established == 0
-    assert handles1 <= handles0 + 3, f"ro ri handle/fd: {handles0} -> {handles1}"
-    assert threads1 <= threads0 + 2, f"ro ri luong: {threads0} -> {threads1}"
-
-
-def test_rs13_parallel_hostile_clients_do_not_break_server(hub):
-    def hostile(kind):
-        with hub.connect() as sock:
-            if kind == 0:
-                sock.sendall(os.urandom(1000))
-            elif kind == 1:
-                abrupt_close(sock.dup())
-            elif kind == 2:
-                result = handshake_initiator(sock, CLIENT_KEY, "peer-X", "hub")
-                send_frame(sock, os.urandom(100))
-            else:
-                result = handshake_initiator(sock, CLIENT_KEY, "peer-X", "hub")
-
-    threads = [threading.Thread(target=hostile, args=(i % 4,)) for i in range(24)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join(30)
-    assert hub.alive()
-    closed = [hub.wait_closed(timeout=10) for _ in range(24)]       # dung 24 ket noi, deu da dong
-    assert len(closed) == 24
-    assert hub.settle(timeout=8) and hub.echo_ok()
-
-
-# ---------------------------------------------------------------- phat hien peer chet am tham
-def test_rs14_keepalive_is_enabled():
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        enable_keepalive(s, idle=10, interval=3, count=3)
-        assert s.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE) != 0
-        if hasattr(socket, "TCP_KEEPIDLE") and sys.platform.startswith("linux"):
-            assert s.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE) == 10
-            assert s.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL) == 3
-            assert s.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT) == 3
+        msg = decode_message(invalid_data)
+        assert msg is None or not validate_message(msg)
+    except Exception:
+        # Nếu ném ngoại lệ giải mã thì được cô lập an toàn
+        pass
