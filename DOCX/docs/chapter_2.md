@@ -7,140 +7,144 @@ Trong mô hình này, mỗi Peer có thể đảm nhận đồng thời hai vai 
 - Client: Gửi yêu cầu đến Peer khác để sử dụng dịch vụ hoặc nhận dữ liệu.
 - Server: Tiếp nhận yêu cầu và cung cấp dữ liệu hoặc dịch vụ cho Peer khác.
 ### 2.1.2. Đặc điểm mô hình P2P:
-Mô hình Peer-to-Peer có những đặc điểm sau:
+Tính phân tán: Các Peer tham gia chia sẻ tài nguyên và thực hiện hoạt động giao tiếp trong hệ thống.
 
-- Tính phân tán: Các Peer tham gia chia sẻ tài nguyên và thực hiện hoạt động giao tiếp trong hệ thống.
-
-- Khả năng giao tiếp hai chiều: Mỗi Peer có thể gửi và nhận dữ liệu từ các Peer khác.
+Khả năng giao tiếp hai chiều: Mỗi Peer có thể gửi và nhận dữ liệu từ các Peer khác.
 Chia sẻ tài nguyên: Các Peer có thể cung cấp dữ liệu, dung lượng lưu trữ hoặc năng lực xử lý cho những Peer khác.
 
-- Khả năng mở rộng: Có thể bổ sung Peer mới vào hệ thống mà không nhất thiết phải nâng cấp một máy chủ trung tâm duy nhất.
-
-Bên cạnh những đặc điểm trên, P2P cũng tồn tại một số hạn chế:
-
-- Khó quản lý tập trung trạng thái và thông tin của toàn bộ Peer.
-
-- Khả năng kết nối phụ thuộc vào điều kiện mạng và trạng thái hoạt động của các thiết bị.
-
-- Cần có cơ chế phát hiện, xử lý Peer không còn hoạt động.
-
-- Việc xác thực và bảo vệ dữ liệu giữa các Peer cần được tổ chức phù hợp.
-
+Khả năng mở rộng: Có thể bổ sung Peer mới vào hệ thống mà không nhất thiết phải nâng cấp một máy chủ trung tâm duy nhất.
 ### 2.1.3. Ứng dụng mô hình P2P trong đề tài:
-Mô hình Peer-to-Peer có thể được ứng dụng để xây dựng các hệ thống trao đổi thông tin và tệp trực tiếp giữa những thiết bị.
 
-Trong một ứng dụng P2P hoạt động trên mạng LAN, các Peer có thể sử dụng cơ chế phát hiện thiết bị để tìm kiếm những nút đang hoạt động. Sau khi xác định địa chỉ kết nối, Peer có thể khởi tạo kết nối trực tiếp đến thiết bị đích.
+Trong đề tài *P2P Chat & File Transfer Application*, mô hình Peer-to-Peer (P2P) được áp dụng để các thiết bị trong cùng mạng nội bộ (LAN) có thể phát hiện và trao đổi dữ liệu trực tiếp với nhau mà không cần máy chủ trung tâm.
 
-Một mô hình giao tiếp thường gặp bao gồm:
+Mỗi Peer có thể đồng thời thực hiện hai vai trò:
 
-1. Các Peer tham gia mạng và khởi tạo thành phần tiếp nhận kết nối.
-2. Hệ thống sử dụng cơ chế Discovery để xác định những Peer có thể liên hệ.
-3. Peer khởi tạo lựa chọn thiết bị đích và yêu cầu thiết lập kết nối.
-4. Sau khi kết nối được thiết lập, hai phía trao đổi dữ liệu thông qua giao thức truyền thông phù hợp.
-5. Ứng dụng quản lý trạng thái kết nối và xử lý các trường hợp Peer ngắt kết nối.
+- **TCP Server:** Lắng nghe và tiếp nhận kết nối từ các Peer khác.
+- **TCP Client:** Chủ động thiết lập kết nối đến Peer đích để gửi dữ liệu.
 
-Trong mô hình này, các giao thức truyền tải như TCP và UDP có thể được kết hợp để hỗ trợ những nhiệm vụ khác nhau.
+Ứng dụng sử dụng cơ chế **UDP Broadcast** để phát hiện các Peer trong mạng LAN. Đối với giao diện GUI, lớp `PeerDiscovery` trong `CODE/p2p_node/discovery.py` định kỳ phát thông điệp beacon có `type` là `p2p_beacon`, bao gồm các trường `instance_id`, `username`, `port` và `timestamp`.
+
+Khi nhận được beacon, ứng dụng kiểm tra thông tin Peer, bỏ qua thông điệp phát ra từ chính phiên chạy của mình, xác định địa chỉ IP từ gói UDP nhận được và kết hợp với TCP port để tạo định danh Peer dạng `IP:port`.
+
+Nếu phát hiện một Peer mới, `PeerDiscovery` phát tín hiệu `peer_discovered` để giao diện cập nhật danh sách Peer khả dụng. Người dùng có thể lựa chọn Peer và thiết lập kết nối TCP để trao đổi tin nhắn hoặc truyền tệp.
+
+Ngoài luồng Discovery tích hợp với GUI, module `discovery.py` còn cung cấp các hàm `send_discovery()` và `listen_discovery()` phục vụ hoạt động CLI. Hai luồng sử dụng cấu trúc thông điệp và nguồn cấu hình khác nhau, vì vậy cần được phân biệt trong phần mô tả triển khai.
 
 ### 2.1.4. Sơ đồ 
 1. kiến trúc giao tiếp giữa hai Peer:
 
-![Hình 2.1. Mô hình giao tiếp trực tiếp giữa hai Peer](image.png)
-
-Sơ đồ thể hiện hai thiết bị có khả năng đồng thời khởi tạo và tiếp nhận kết nối. Khi điều kiện mạng cho phép, dữ liệu có thể được trao đổi trực tiếp giữa các thiết bị mà không cần máy chủ trung gian chuyển tiếp nội dung.
+![Kiến trúc giao tiếp giữa hai Peer](image.png)
 
 2. Sơ đồ chi tiết luồng Discovery → TCP  → Message:
 
-![Hình 2.2. Luồng tổng quát từ phát hiện Peer đến trao đổi dữ liệu](image-1.png)
+![Luồng Discovery, TCP và Message](image-1.png)
 
-Sơ đồ minh họa quá trình một Peer phát hiện thiết bị khác, xác định thông tin kết nối và thực hiện trao đổi dữ liệu sau khi kết nối được thiết lập.
-
-Đây là mô hình tổng quát làm cơ sở để nghiên cứu các giao thức truyền thông và cơ chế quản lý kết nối trong ứng dụng P2P.
+- Peer A và Peer B đều khởi chạy cơ chế UDP Discovery để thông báo sự hiện diện trong mạng LAN.
+- Peer A nhận beacon từ Peer B và xác định địa chỉ IP nguồn cùng cổng TCP được cung cấp trong thông điệp.
+- Thành phần PeerDiscovery xử lý thông tin và phát tín hiệu để giao diện cập nhật danh sách Peer.
+- Khi người dùng lựa chọn Peer B để giao tiếp, ứng dụng sử dụng thông tin địa chỉ IP và cổng TCP tương ứng.
+- Ứng dụng có thể thiết lập kết nối TCP giữa hai Peer.
+- Sau khi kết nối được thiết lập, hai Peer thực hiện trao đổi dữ liệu theo giao thức tầng ứng dụng.
 
 ## 2.2. Giao thức TCP
 ### 2.2.1. Khái niệm giao thức TCP:
-TCP (Transmission Control Protocol) là giao thức truyền tải thuộc tầng Transport trong mô hình TCP/IP, được sử dụng để thiết lập kết nối và trao đổi dữ liệu giữa các ứng dụng trên những thiết bị có khả năng giao tiếp qua mạng IP.
 
-TCP cung cấp cơ chế truyền dữ liệu hướng kết nối (Connection-oriented), bảo đảm dữ liệu được cung cấp cho ứng dụng nhận theo đúng thứ tự và hạn chế mất mát dữ liệu thông qua các cơ chế xác nhận, truyền lại và kiểm soát truyền tải.
-
-TCP truyền dữ liệu dưới dạng luồng byte liên tục (Byte Stream), không tự duy trì ranh giới giữa các thông điệp ở tầng ứng dụng. Vì vậy, ứng dụng cần có cơ chế xác định ranh giới thông điệp khi trao đổi những đơn vị dữ liệu độc lập.
+TCP (Transmission Control Protocol) là giao thức truyền tải thuộc tầng Transport trong mô hình TCP/IP, cung cấp cơ chế truyền dữ liệu có kết nối, đáng tin cậy và đúng thứ tự dưới dạng luồng byte giữa các thiết bị thông qua mạng máy tính.
 
 ### 2.2.2. Đặc điểm chính của TCP: 
 | Đặc điểm | Chi tiết |
 |---|---|
 | Hướng kết nối | Thiết lập kết nối trước khi truyền dữ liệu |
-| Truyền dữ liệu tin cậy | Sử dụng cơ chế xác nhận và truyền lại nhằm bảo đảm dữ liệu được truyền đầy đủ khi kết nối hoạt động bình thường |
+| Độ tin cậy | Có cơ chế xác nhận (ACK) và truyền lại (Retransmission) khi cần. |
 | Đúng thứ tự | Dữ liệu được cung cấp cho ứng dụng theo đúng thứ tự byte |
 | Kiểm tra lỗi | Sử dụng checksum để phát hiện lỗi trong segment |
 | Kiểm soát luồng | Điều chỉnh lượng dữ liệu gửi để tránh làm tràn bộ đệm bên nhận |
 | Kiểm soát tắc nghẽn | Điều chỉnh tốc độ truyền khi mạng có dấu hiệu tắc nghẽn |
 | Truyền dữ liệu dạng luồng | Cung cấp luồng byte liên tục, không bảo toàn ranh giới từng lần gửi | 
 
-Những đặc điểm trên giúp TCP phù hợp với các ứng dụng yêu cầu dữ liệu được truyền có thứ tự và tin cậy, chẳng hạn như trao đổi thông điệp, truyền tệp và giao tiếp giữa các thiết bị.
-
-Tuy nhiên, TCP không bảo đảm rằng mọi kết nối đều thành công hoặc luôn duy trì liên tục. Khi xảy ra lỗi mạng hoặc kết nối bị ngắt, ứng dụng vẫn cần có cơ chế phát hiện và xử lý phù hợp.
-
-Ngoài ra, TCP không tự cung cấp cơ chế mã hóa nội dung hoặc xác thực danh tính ứng dụng ở hai đầu kết nối. Những yêu cầu bảo mật này cần được triển khai thông qua các giao thức hoặc cơ chế bổ sung.
-
 ### 2.2.3. Cơ chế bắt tay ba bước (Three-way Handshake):
-Trước khi trao đổi dữ liệu, TCP sử dụng cơ chế bắt tay ba bước (Three-way Handshake) nhằm thiết lập kết nối và đồng bộ các thông tin cần thiết giữa hai đầu giao tiếp.
-
-Quá trình này gồm ba bước:
+TCP sử dụng cơ chế bắt tay ba bước (Three-way Handshake) để thiết lập kết nối giữa hai thiết bị trước khi truyền dữ liệu.
 
 Bước 1: SYN (Synchronize):
 - Peer A gửi một gói tin SYN đến Peer B.
 
 Bước 2: SYN-ACK (Synchronize-Acknowledge):
 - Peer B nhận được yêu cầu từ Peer A.
-- B gửi lịa gói SYN-ACK để xác nhận yêu cầu và thông báo số thứ tự ban đầu của mình
+- Peer B gửi lại gói SYN-ACK để xác nhận yêu cầu kết nối của Peer A và thông báo số thứ tự ban đầu của mình.
 
 Bước 3: ACK(Acknowledge):
 - Peer A nhận được phản hồi từ B.
 - A gửi gói ACK để xác nhận.
 - Sau khi hoàn thành ba bước, kết nối TCP được thiết lập và hai bên có thể bắt đầu trao đổi dữ liệu. 
 
-Cơ chế Three-way Handshake giúp hai phía đồng bộ thông tin kết nối trước khi truyền dữ liệu.
+**Hình 2.3. Cơ chế bắt tay ba bước của TCP**
 
-Cần phân biệt rằng quá trình bắt tay TCP chỉ phục vụ thiết lập kết nối ở tầng Transport, không thực hiện xác thực danh tính ứng dụng hay trao đổi khóa mã hóa.
-
-Nếu ứng dụng yêu cầu bảo mật dữ liệu, các cơ chế như trao đổi khóa và thiết lập phiên mã hóa được thực hiện riêng ở tầng ứng dụng hoặc thông qua giao thức bảo mật phù hợp.
-
-Sơ đồ trình tự TCP Three-way Handshake
-
-![sơ đồ trình tự hanhshake](image-2.png)
+![TCP Three-way Handshake](image-2.png)
 
 
 ### 2.2.4. Cơ chế truyền dữ liệu của TCP:
-Sau khi kết nối được thiết lập, TCP bắt đầu truyền dữ liệu theo cơ chế: 
-1. Đánh số thứ tự (Sequence Number):  Xác định vị trí các byte dữ liệu trong luồng truyền, giúp phía nhận sắp xếp dữ liệu theo đúng thứ tự. 
-2. Xác nhận dữ liệu (Acknowledgement): Phía nhận thông báo vị trí byte tiếp theo mà nó mong đợi nhận được, qua đó xác nhận dữ liệu đã tiếp nhận.
-3. Truyền lại (Retranmission): Nếu dữ liệu bị mất hoặc không được xác nhận trong khoảng thời gian phù hợp, TCP có thể truyền lại.
-4. Kiểm soát luồng (Flow Control): Điều chỉnh tốc độ gửi để han chế tình trạng quá tải mạng.
-5. Kiểm soát tắc nghẽn (Congestion Control): Điều chỉnh tốc độ gửi để hạn chế tình trạng quá tải mạng.
 
-Một đặc điểm quan trọng là TCP không bảo toàn ranh giới giữa các lần gửi dữ liệu. Một lần gửi có thể được tiếp nhận thông qua nhiều lần đọc hoặc nhiều lần gửi có thể được đọc trong cùng một lần nhận.
+Sau khi kết nối được thiết lập, TCP cung cấp các cơ chế hỗ trợ quá trình truyền dữ liệu đáng tin cậy:
 
-Do đó, đối với ứng dụng trao đổi thông điệp, cần bổ sung cơ chế đóng khung dữ liệu (Message Framing) để xác định ranh giới từng thông điệp. Một phương pháp là Length-Prefix Framing, được trình bày tại mục 2.5.3.
+1. **Đánh số thứ tự (Sequence Number):** Theo dõi vị trí của dữ liệu trong luồng byte, hỗ trợ việc sắp xếp dữ liệu theo đúng thứ tự.
+2. **Xác nhận dữ liệu (Acknowledgement):** Bên nhận gửi thông tin xác nhận dữ liệu đã tiếp nhận.
+3. **Truyền lại (Retransmission):** TCP có thể truyền lại dữ liệu khi phát hiện mất dữ liệu hoặc không nhận được xác nhận trong khoảng thời gian phù hợp.
+4. **Kiểm soát luồng (Flow Control):** Điều tiết lượng dữ liệu gửi dựa trên khả năng tiếp nhận và dung lượng bộ đệm của bên nhận.
+5. **Kiểm soát tắc nghẽn (Congestion Control):** Điều chỉnh lượng dữ liệu truyền nhằm hạn chế tình trạng tắc nghẽn trên mạng.
 
-### 2.2.5. Ứng dụng TCP trong đề tài:
-Quá trình giao tiếp diễn ra như sau: 
+Trong đề tài P2P Chat & File Transfer Application, giao thức TCP được sử dụng để thiết lập kết nối và trao đổi dữ liệu trực tiếp giữa các Peer. Mỗi Peer có khả năng lắng nghe kết nối đến và chủ động kết nối tới Peer khác khi cần trao đổi thông tin.
 
-1. Peer khởi tạo xác định địa chỉ IP và TCP Port của Peer đích.
-2. TCP Client gửi yêu cầu thiết lập kết nối đến TCP Server của Peer đích.
-3. Hai bên thực hiện quá trình Three-way Handshake ở tầng TCP.
-4. Sau khi kết nối được thiết lập, ứng dụng có thể thực hiện các bước trao đổi thông tin hoặc thiết lập bảo mật cần thiết.
-5. Các Peer sử dụng kết nối TCP để truyền và nhận dữ liệu.
-6. Khi kết thúc giao tiếp hoặc xảy ra lỗi, ứng dụng xử lý và giải phóng tài nguyên kết nối theo cơ chế phù hợp.
+Quy trình giao tiếp TCP trong ứng dụng được mô tả như sau:
+
+Khi ứng dụng khởi chạy, thành phần TCP Listener mở socket và lắng nghe kết nối tại cổng đã được cấu hình.
+
+Sau khi phát hiện Peer thông qua cơ chế UDP Discovery hoặc nhận được thông tin kết nối hợp lệ, ứng dụng có thể chủ động thiết lập kết nối TCP đến Peer đích.
+
+Hai thiết bị thực hiện cơ chế bắt tay ba bước (Three-way Handshake) ở tầng TCP để thiết lập kết nối.
+
+Sau khi kết nối được thiết lập, ứng dụng sử dụng giao thức thông điệp ở tầng ứng dụng để đóng gói, gửi và nhận dữ liệu.
+
+Peer nhận đọc dữ liệu từ socket, tái tạo thông điệp theo định dạng đóng khung tương ứng và chuyển đến thành phần xử lý.
+
+Các thành phần triển khai TCP trong ứng dụng
+
+| Module | Vai trò |
+|---|---|
+| CODE/main.py | Điểm khởi chạy ứng dụng, tiếp nhận tham số và khởi tạo GUI. |
+| CODE/ui/app.py | Tích hợp giao diện và các thành phần giao tiếp mạng. |
+| CODE/p2p_node/listener.py | Triển khai TCP Listener để lắng nghe và xử lý kết nối đến. |
+| CODE/p2p_node/sender.py | Triển khai cơ chế chủ động kết nối và gửi dữ liệu đến Peer đích. |
+| CODE/shared/protocol.py | Cung cấp các hàm tạo, đóng gói, đọc và kiểm tra thông điệp. |
+| CODE/config/ | Quản lý các tham số cấu hình phục vụ ứng dụng và các luồng chạy tương ứng. |
+
+Cơ chế đóng khung dữ liệu TCP
+
+TCP cung cấp luồng byte liên tục và không tự bảo toàn ranh giới thông điệp của ứng dụng. Vì vậy, hệ thống sử dụng cơ chế Message Framing để xác định điểm bắt đầu, độ dài và nội dung của từng thông điệp.
+
+Trong CODE/shared/protocol.py hiện có hai nhóm API đóng khung dữ liệu:
+
+1. JSON Message Framing
+
+Các hàm encode_message() và recv_message() sử dụng cấu trúc:
+
+[4-byte Message Length] + [JSON Message UTF-8]
+
+Bốn byte đầu biểu diễn độ dài toàn bộ thông điệp JSON sau khi mã hóa UTF-8. Phía nhận đọc độ dài này để xác định số byte cần tiếp nhận.
+
+2. JSON Header kết hợp Binary Payload
+
+Các hàm pack_message() và read_message() sử dụng cấu trúc:
+
+[4-byte Header Length] + [JSON Header UTF-8] + [Binary Payload]
+
+Bốn byte đầu biểu diễn độ dài của JSON Header. Trường payload_size trong Header xác định số byte dữ liệu nhị phân đi kèm.
+
+Hai định dạng này phục vụ các API truyền thông khác nhau và không thể sử dụng thay thế trực tiếp cho nhau.
+
 
 ## 2.3. Giao thức UDP
 ### 2.3.1. Khái niệm giao thức UDP:
-UDP (User Datagram Protocol) là giao thức truyền tải thuộc tầng Transport trong mô hình TCP/IP, cho phép các ứng dụng trao đổi dữ liệu thông qua những đơn vị được gọi là Datagram.
-
-Khác với TCP, UDP là giao thức không hướng kết nối (Connectionless). UDP không yêu cầu thiết lập kết nối bằng cơ chế Three-way Handshake trước khi gửi dữ liệu.
-
-UDP cung cấp cơ chế truyền dữ liệu đơn giản với overhead thấp, nhưng không tự bảo đảm việc dữ liệu được chuyển đến đích, không bảo đảm thứ tự tiếp nhận và không cung cấp cơ chế truyền lại khi xảy ra mất gói.
-
-Nhờ những đặc điểm này, UDP phù hợp với các ứng dụng cần trao đổi những thông điệp độc lập, có kích thước nhỏ hoặc ưu tiên sự đơn giản trong quá trình truyền dữ liệu.
-
+UDP (User Datagram Protocol) là giao thức truyền tải thuộc tầng Transport trong mô hình TCP/IP. UDP cho phép các ứng dụng gửi và nhận dữ liệu thông qua các gói tin được gọi là Datagram. 
 ### 2.3.2. Đặc điểm của UDP:
 | Đặc điểm | Chi tiết |
 |---|---|
@@ -152,70 +156,114 @@ Nhờ những đặc điểm này, UDP phù hợp với các ứng dụng cần 
 | Hỗ trợ Broadcast | Có thể gửi dữ liệu đến các thiết bị trong phạm vi mạng Broadcast |
 | Hỗ trợ Multicast | Có thể gửi dữ liệu đến một nhóm thiết bị tham gia nhóm Multicast |
 
-So với TCP, UDP có cơ chế truyền tải đơn giản hơn do không quản lý việc thiết lập kết nối, xác nhận dữ liệu và truyền lại.
-
-Tuy nhiên, ứng dụng sử dụng UDP cần tự xem xét những vấn đề như mất gói, dữ liệu không hợp lệ, giới hạn kích thước Datagram và khả năng tiếp nhận của thiết bị đích.
-
 ### 2.3.3. Cơ chế hoạt động của UDP:
-Quá trình truyền dữ liệu bằng UDP có thể được mô tả thông qua các bước:
-
 1. Ứng dụng gửi tạo dữ liệu cần truyền.
 2. UDP đóng gói dữ liệu thành Datagram.
 3. Datagram được gửi đến địa chỉ IP và UDP Port đích.
-4. Nếu Datagram đến được thiết bị đích và có Socket phù hợp tiếp nhận, ứng dụng phía nhận có thể đọc dữ liệu.
-5. Ứng dụng tiếp tục kiểm tra và xử lý nội dung Datagram.
+4. Thiết bị nhận sử dụng UDP Port tương ứng để tiếp nhận Datagram.
+5. Ứng dụng nhận xử lý nội dung dữ liệu.
 
-UDP không yêu cầu phía gửi duy trì một kết nối truyền thông với phía nhận.
-
-Khác với TCP, UDP bảo toàn ranh giới giữa các Datagram. Tuy nhiên, nếu bộ đệm nhận không đủ lớn, dữ liệu trong Datagram có thể bị cắt bớt tùy theo cách sử dụng Socket.
-
-Do không có cơ chế xác nhận và truyền lại tích hợp, việc gửi thành công một Datagram không đồng nghĩa với việc phía nhận đã tiếp nhận hoặc xử lý thành công nội dung dữ liệu.
+UDP có thể được sử dụng trong các cơ chế giao tiếp như Unicast, Broadcast và Multicast. Tuy nhiên, trong phạm vi triển khai của đề tài, chức năng Peer Discovery sử dụng UDP Broadcast để phát hiện các Peer trong mạng LAN. Multicast được trình bày nhằm bổ sung kiến thức cơ sở lý thuyết, không phải là chức năng Discovery đã được tích hợp trong ứng dụng.
 
 ### 2.3.4. Cơ chế UDP Broadcast:
-UDP Broadcast là cơ chế cho phép một thiết bị gửi Datagram đến một địa chỉ Broadcast, nhằm truyền thông tin đến các thiết bị có khả năng tiếp nhận trong cùng phạm vi mạng Broadcast.
+UDP Broadcast là cơ chế cho phép một thiết bị gửi datagram đến địa chỉ broadcast để các thiết bị trong cùng phạm vi mạng có thể tiếp nhận thông tin mà không cần thiết lập kết nối trước.
 
-Trong mạng IPv4, địa chỉ Broadcast có thể là địa chỉ Broadcast của một mạng con hoặc địa chỉ Limited Broadcast 255.255.255.255.
+Trong ứng dụng P2P Chat & File Transfer Application, UDP Broadcast được sử dụng để phát hiện các Peer đang hoạt động trong mạng LAN trước khi thiết lập kết nối TCP.
 
-Thông thường, Broadcast được sử dụng trong phạm vi mạng cục bộ và không được chuyển tiếp qua các router theo cách định tuyến thông thường.
+a. Cơ chế Peer Discovery trong ứng dụng GUI
 
-Một ứng dụng phổ biến của UDP Broadcast là Peer Discovery, cho phép các thiết bị trong mạng LAN phát hiện sự hiện diện của nhau mà không cần phụ thuộc vào máy chủ trung tâm.
+Ứng dụng GUI triển khai chức năng phát hiện Peer thông qua lớp PeerDiscovery, được định nghĩa trong module CODE/p2p_node/discovery.py.
 
-Về nguyên lý, quá trình Peer Discovery bằng UDP Broadcast gồm các bước:
+Lớp này kế thừa QThread của PyQt6, thực hiện gửi và nhận UDP beacon trên luồng nền nhằm hạn chế ảnh hưởng đến khả năng phản hồi của giao diện.
 
-1. Peer A tạo thông điệp Discovery chứa `peer_id` và `tcp_port`.
-2. A gửi thông điệp bằng UDP Broadcast đến cổng Discovery được quy định. 
-3. Các Peer đang chạy chương trình và lắng nghe cổng Discovery tương ứng có thể nhận được thông điệp. 
-4. Peer nhận kiểm tra tính hợp lệ của thông tin Discovery. 
-5. Nếu thông tin hợp lệ, Peer nhận lưu địa chỉ IP và TCP Port của Peer gửi vào Peer Manager để sử dụng cho quá trình thiết lập kết nối tiếp theo. 
+Thông điệp beacon có cấu trúc như sau:
 
-Cần lưu ý rằng UDP Broadcast chỉ hỗ trợ phát hiện Peer trong những điều kiện mạng phù hợp. Khả năng tiếp nhận còn phụ thuộc vào cấu hình mạng, tường lửa, chính sách thiết bị và phạm vi Broadcast.
+```json
+{
+  "type": "p2p_beacon",
+  "instance_id": "550e8400-e29b-41d4-a716-446655440000",
+  "username": "Alice",
+  "port": 9001,
+  "timestamp": 1795222800.0
+}
+```
 
-Việc phát hiện được một Peer cũng không đồng nghĩa với việc kết nối TCP đến Peer đó chắc chắn thành công.
+Trong đó:
 
-### 2.3.5. Vai trò của UDP trong ứng dụng Peer-to-Peer:
-Trong hệ thống Peer-to-Peer, UDP có thể được sử dụng để hỗ trợ phát hiện các thiết bị đang hoạt động trong mạng nội bộ.
-
-Cơ chế Discovery giúp các Peer trao đổi thông tin nhận diện và địa chỉ kết nối, từ đó hỗ trợ việc thiết lập kết nối trực tiếp bằng TCP.
-
-Có thể phân biệt vai trò của hai giao thức như sau:
-| Giao thức | Vai trò |
+| Trường | Ý nghĩa |
 |---|---|
-| UDP | hỗ trợ phát hiện Peer và trao đổi thông tin Discovery trong mạng LAN |
-| TCP | thiết lập kết nối và truyền nhận dữ liệu ứng dụng giữa các Peer | 
+| type | Xác định thông điệp phát hiện Peer, có giá trị p2p_beacon. |
+| instance_id | UUID định danh phiên chạy của ứng dụng. |
+| username | Tên hiển thị của Peer gửi. |
+| port | Cổng TCP mà Peer đang lắng nghe. |
+| timestamp | Thời điểm tạo beacon, biểu diễn dưới dạng Unix timestamp. |
 
-Việc kết hợp UDP và TCP cho phép hệ thống tận dụng ưu điểm của từng giao thức: UDP hỗ trợ phát hiện thiết bị mà không cần thiết lập kết nối trước, trong khi TCP cung cấp cơ chế truyền dữ liệu tin cậy và có thứ tự.
+Quy trình phát hiện Peer trong GUI gồm các bước:
 
-Tuy nhiên, hệ thống vẫn cần có cơ chế quản lý danh sách Peer, kiểm tra thông tin Discovery và xử lý các trường hợp thiết bị không còn hoạt động.
+1. Khi ứng dụng khởi chạy, PeerDiscovery được khởi tạo với tên người dùng và cổng TCP đang sử dụng.
+
+2. Peer định kỳ phát UDP beacon đến địa chỉ broadcast 255.255.255.255, sử dụng cổng Discovery mặc định 37020.
+
+3. Các Peer đang lắng nghe trên cổng tương ứng tiếp nhận beacon thông qua recvfrom().
+
+4. Peer nhận kiểm tra loại thông điệp và bỏ qua beacon có instance_id trùng với phiên chạy của chính mình. Mã nguồn còn có điều kiện lọc bổ sung dựa trên IP nguồn và cổng TCP.
+
+5. Ứng dụng xác định địa chỉ IP của Peer gửi từ gói UDP nhận được và kết hợp với trường port để tạo định danh Peer dạng IP:port.
+
+6. Nếu Peer chưa nằm trong danh sách đã phát hiện, lớp PeerDiscovery phát tín hiệu peer_discovered.
+
+7. Giao diện nhận tín hiệu và cập nhật danh sách Peer khả dụng.
+
+Lớp PeerDiscovery cũng theo dõi thời điểm nhận beacon gần nhất của từng Peer. Khi một Peer không còn gửi beacon trong khoảng thời gian vượt quá HEARTBEAT_TIMEOUT (mặc định 15 giây), hệ thống loại Peer khỏi danh sách theo dõi và phát tín hiệu peer_lost.
+
+Theo cấu hình mặc định, khoảng thời gian phát beacon là 3 giây.
+
+b. Cơ chế Discovery trong công cụ CLI
+
+Bên cạnh lớp PeerDiscovery phục vụ GUI, module CODE/p2p_node/discovery.py còn cung cấp hai hàm:
+
+send_discovery(): Gửi thông điệp Discovery bằng UDP Broadcast.
+
+listen_discovery(): Tiếp nhận và kiểm tra thông điệp Discovery, sau đó cập nhật thông tin Peer thông qua PeerManager.
+
+Luồng CLI sử dụng cấu trúc thông điệp riêng:
+
+```json
+{
+  "type": "DISCOVERY",
+  "peer_id": "peer-A",
+  "tcp_port": 7000
+}
+```
+
+Các tham số của luồng CLI được đọc từ CODE/config/network.json thông qua config_loader.py. Trong cấu hình đang được lưu tại repository, cổng Discovery của CLI là 9999.
+
+Hai luồng GUI và CLI có cấu trúc thông điệp, nguồn cấu hình và cách cập nhật danh sách Peer khác nhau. Vì vậy, tài liệu phân biệt rõ hai cơ chế này thay vì xem chúng là một luồng xử lý duy nhất.
+
+c. Các thành phần Socket được sử dụng
+
+| Thành phần | Chức năng |
+|---|---|
+| socket.AF_INET | Sử dụng địa chỉ IPv4. |
+| socket.SOCK_DGRAM | Tạo socket UDP. |
+| socket.SO_BROADCAST | Cho phép gửi datagram đến địa chỉ broadcast. |
+| socket.SO_REUSEADDR | Hỗ trợ cấu hình tái sử dụng địa chỉ socket trong những điều kiện phù hợp. |
+|sendto() | Gửi thông điệp UDP đến địa chỉ IP và cổng đích. |
+| recvfrom() | Nhận datagram và thông tin địa chỉ của bên gửi. |
+| QThread | Cho phép xử lý Peer Discovery trên luồng nền của ứng dụng GUI.
+
+Việc sử dụng UDP Broadcast giúp các Peer trong cùng phạm vi mạng có thể tự động phát hiện sự hiện diện của nhau. Tuy nhiên, cơ chế này phụ thuộc vào khả năng truyền broadcast của mạng LAN và không bảo đảm phát hiện được các Peer nằm ngoài phạm vi broadcast hoặc trong môi trường mạng hạn chế lưu lượng UDP.
 
 ## 2.4. Lập trình Socket
 ### 2.4.1. Khái niệm Socket:
-Socket là một giao diện lập trình (Application Programming Interface – API) cho phép các ứng dụng thực hiện hoạt động giao tiếp và trao đổi dữ liệu qua mạng.
 
-Thông qua Socket, ứng dụng có thể tạo điểm cuối giao tiếp, thiết lập kết nối, gửi và nhận dữ liệu bằng những giao thức truyền tải như TCP hoặc UDP.
+Socket là điểm cuối giao tiếp mạng được hệ điều hành cung cấp thông qua giao diện lập trình ứng dụng (API), cho phép các tiến trình gửi và nhận dữ liệu qua mạng máy tính.
 
-Đối với các ứng dụng sử dụng TCP/IP, Socket thường được gắn với thông tin địa chỉ IP, số cổng (Port) và giao thức truyền tải.
+Trong lập trình mạng, socket có thể được gắn với địa chỉ IP, cổng và giao thức truyền tải tương ứng.
 
-Lập trình Socket cho phép nhà phát triển xây dựng các chức năng giao tiếp mạng ở tầng ứng dụng mà không cần trực tiếp xử lý toàn bộ cơ chế truyền tải ở những tầng bên dưới. 
+Một kết nối TCP được nhận diện thông qua bốn thành phần: địa chỉ IP nguồn, cổng nguồn, địa chỉ IP đích và cổng đích.
+
+Trong ứng dụng P2P, TCP Socket được sử dụng để thiết lập kết nối và trao đổi dữ liệu giữa các Peer, trong khi UDP Socket được sử dụng để phát hiện các Peer thông qua cơ chế Broadcast.
 
 ### 2.4.2. Các thành phần cơ bản:
 | Thành phần | Ý nghĩa |
@@ -224,13 +272,7 @@ Lập trình Socket cho phép nhà phát triển xây dựng các chức năng g
 | Port | Xác định ứng dụng hoặc dịch vụ đang giao tiếp trên thiết bị |
 | Protocol | Xác định giao thức truyền tải: TCP hoặc UDP |
 | Socket | Điểm cuối giao tiếp mạng được ứng dụng sử dụng để gửi và nhận dữ liệu |
-| Endpoint | Điểm cuối giao tiếp, thường được xác định bởi địa chỉ IP và Port trong TCP/IP |
-
-Trong giao tiếp TCP, một kết nối được phân biệt bởi địa chỉ IP và Port của cả hai đầu giao tiếp cùng giao thức truyền tải.
-
-### 2.4.3. Lập trình TCP Socket:
-
-TCP Socket cung cấp giao diện cho ứng dụng thiết lập kết nối và trao đổi dữ liệu dưới dạng luồng byte.
+### 2.4.3. Các hàm Socket TCP:
 
 | Hàm | Chức năng |
 |---|---|
@@ -243,48 +285,24 @@ TCP Socket cung cấp giao diện cho ứng dụng thiết lập kết nối và
 | `recv()` | Nhận dữ liệu từ kết nối |
 | `close()` | Đóng socket |
 
-Trong mô hình TCP Client–Server, phía Server sử dụng bind(), listen() và accept() để tiếp nhận kết nối. Phía Client sử dụng connect() để yêu cầu kết nối đến địa chỉ và cổng của Server.
-
-Sau khi kết nối được thiết lập, hai phía có thể sử dụng sendall() và recv() để trao đổi dữ liệu.
-
-Do TCP hoạt động dưới dạng luồng byte, ứng dụng cần sử dụng cơ chế xác định ranh giới thông điệp nếu dữ liệu được tổ chức thành những thông điệp độc lập.
-
-### 2.4.4. Lập trình UDP Socket 
-
-UDP Socket cho phép ứng dụng gửi và nhận Datagram mà không yêu cầu thiết lập kết nối TCP trước khi truyền dữ liệu.
-
+### 2.4.4. Các hàm Socket UDP:
 | Hàm | Chức năng |
 |---|---|
 | `socket()` | Tạo UDP Socket |
 | `bind()` | Gắn socket với IP và Port để nhận dữ liệu |
 | `sendto()` | Gửi Datagram đến IP và Port đích |
 | `recvfrom()` | Nhận Datagram và địa chỉ người gửi |
-| `setsockopt()` | Cấu hình một số tùy chọn của Socket, chẳng hạn cho phép Broadcast |
-| `settimeout()` | thiết lập thời gian chờ cho các thao tác Socket | 
 | `close()` | Đóng Socket | 
 
-Trong trường hợp sử dụng UDP Broadcast, ứng dụng có thể cấu hình tùy chọn SO_BROADCAST để cho phép gửi Datagram đến địa chỉ Broadcast.
-
-Phía nhận sử dụng recvfrom() để tiếp nhận dữ liệu và xác định địa chỉ IP nguồn của Datagram.
-
-Ứng dụng cần kiểm tra nội dung nhận được và xử lý các trường hợp dữ liệu không hợp lệ hoặc không có phản hồi.
-
 ### 2.4.5. Ứng dụng Socket trong đề tài:
-Trong các ứng dụng Peer-to-Peer, Socket đóng vai trò là giao diện giao tiếp mạng giữa các thiết bị.
+Trong ứng dụng *P2P Chat & File Transfer Application*, Socket được sử dụng để triển khai hai cơ chế giao tiếp mạng chính:
 
-Một Peer có thể đồng thời sử dụng:
+- **TCP Socket:** Được triển khai trong các module `CODE/p2p_node/listener.py` và `CODE/p2p_node/sender.py`, phục vụ thiết lập kết nối và trao đổi dữ liệu giữa các Peer.
+- **UDP Socket:** Được triển khai trong `CODE/p2p_node/discovery.py`, phục vụ phát hiện các Peer đang hoạt động trong mạng LAN thông qua UDP Broadcast.
 
-- TCP Server Socket: Lắng nghe và chấp nhận các kết nối đến.
-- TCP Client Socket: Chủ động thiết lập kết nối đến Peer khác.
-- UDP Socket: Hỗ trợ gửi và nhận các thông điệp phát hiện thiết bị trong mạng nội bộ.
+Các thành phần giao tiếp mạng được tích hợp vào giao diện ứng dụng thông qua `CODE/ui/app.py`.
 
-Thông qua Socket, ứng dụng có thể thực hiện các thao tác phát hiện Peer, thiết lập kết nối và trao đổi dữ liệu.
-
-Tuy nhiên, Socket API chỉ cung cấp phương tiện giao tiếp mạng. Các cơ chế như định dạng thông điệp, kiểm tra dữ liệu, quản lý trạng thái kết nối, bảo mật và xử lý lỗi cần được xây dựng ở tầng ứng dụng.
-
-Đây là cơ sở để thiết kế các thành phần giao tiếp và trao đổi dữ liệu trong hệ thống Peer-to-Peer.
-
-## 2.5. Dịnh dạng dữ liệu JSON
+## 2.5. Định dạng dữ liệu và giao thức thông điệp
 ### 2.5.1. Khái niệm JSON:
 JSON (JavaScript Object Notation) là định dạng dữ liệu dùng để lưu trữ và trao đổi thông tin giữa các hệ thống. JSON có cấu trúc đơn giản, dễ đọc, dễ xử lý bằng nhiều ngôn ngữ lập trình. 
 
@@ -296,7 +314,7 @@ JSON thường sử dụng các kiểu dữ liệu:
 - `Object`: Đối tượng gồm các cặp key-value
 - `Null`: Giá trị rỗng 
 
-Trong Python, thư viện json cung cấp các phương thức hỗ trợ chuyển đổi dữ liệu giữa đối tượng Python và định dạng JSON:
+Một số thư viện `json` để chuyển đổi dữ liệu:
 | Hàm | Chức năng |
 |---|---|
 | `json.dumps()` | Chuyển Python Object thành chuỗi JSON |
@@ -305,238 +323,545 @@ Trong Python, thư viện json cung cấp các phương thức hỗ trợ chuy�
 | `json.load()` | Đọc dữ liệu JSON từ file |
 
 ### 2.5.2. Cấu trúc Header và Payload:
-Header: Chứa các thông tin phục vụ nhận diện, phân loại và xử lý thông điệp, chẳng hạn như mã định danh, loại thông điệp, nguồn gửi, đích nhận và thời điểm tạo.
+Trong ứng dụng P2P Chat & File Transfer, dữ liệu trao đổi giữa các Peer được tổ chức dưới dạng thông điệp có cấu trúc. Thông điệp thường bao gồm thông tin điều khiển (Header) và nội dung dữ liệu (Payload).
 
-Payload: chứa dữ liệu thực tế mà người gửi muốn truyền đi. Cấu trúc của Payload có thể thay đổi tùy theo loại thông điệp, ví dụ văn bản, thông tin tệp hoặc dữ liệu điều khiển.. 
+Header: Chứa thông tin định danh, loại thông điệp, bên gửi và các thông số cần thiết để xử lý thông điệp.
 
-Sơ đồ cấu trúc JSON Message 
+Payload: Chứa dữ liệu thực tế cần trao đổi. Payload có thể là một đối tượng JSON hoặc một chuỗi byte nhị phân tùy theo cơ chế đóng khung được sử dụng.
 
-![alt text](image-3.png)
+Theo mã nguồn hiện tại tại CODE/shared/protocol.py, ứng dụng có hai nhóm API với cấu trúc thông điệp khác nhau.
 
-Ví dụ minh họa cấu trúc thông điệp JSON: 
+a. Cấu trúc JSON Message
+
+Nhóm API create_message(), validate_message(), encode_message() và recv_message() sử dụng đối tượng JSON gồm hai thành phần header và payload.
+
+Các trường Header:
+
+| Trường | Kiểu dữ liệu | Ý nghĩa |
+|---|---|---|
+| message_id | String (UUID) | Định danh duy nhất của thông điệp |
+| message_type | String | Xác định loại thông điệp |
+| sender_id | String | Định danh Peer gửi |
+| receiver_id | String | Định danh Peer nhận |
+| timestamp | String | Thời điểm tạo thông điệp theo ISO 8601 UTC |
+
+Trường timestamp được biểu diễn theo múi giờ UTC. Ví dụ, 2026-11-21T10:00:00+00:00 là một giá trị hợp lệ về định dạng.
+
+Ví dụ thông điệp TEXT:
+
 ```json 
 {
-  "header":{
-      "message_id": "UUID",
-      "message_type": "TEXT",
-      "sender_id": "peer_A",
-      "receiver_id": "peer_B",
-      "timestamp": "2026-10-26T01:00:00Z"
+  "header": {
+    "message_id": "550e8400-e29b-41d4-a716-446655440001",
+    "message_type": "TEXT",
+    "sender_id": "peer_A",
+    "receiver_id": "peer_B",
+    "timestamp": "2026-11-21T10:00:00+00:00"
   },
-  "payload":{
+  "payload": {
     "text": "Xin chào!"
   }
 }
 ```
-Trong ví dụ trên, Header cung cấp thông tin nhận diện thông điệp, còn Payload chứa nội dung văn bản được trao đổi giữa hai thiết bị.
 
-Cấu trúc Header/Payload không phải là quy định bắt buộc của JSON mà là cách tổ chức dữ liệu do ứng dụng hoặc giao thức lựa chọn.
+Trong ví dụ này, TEXT được xác định thông qua header.message_type. Nội dung tin nhắn được lưu tại payload.text.
+
+Ví dụ thông điệp EMOJI:
+
+```json
+{
+  "header": {
+    "message_id": "550e8400-e29b-41d4-a716-446655440002",
+    "message_type": "EMOJI",
+    "sender_id": "peer_A",
+    "receiver_id": "peer_B",
+    "timestamp": "2026-11-21T10:01:00+00:00"
+  },
+  "payload": {
+    "emoji": "😂"
+  }
+}
+```
+
+Hàm validate_message() kiểm tra các trường Header bắt buộc. Đối với TEXT và EMOJI, hàm kiểm tra trường nội dung tương ứng phải có kiểu chuỗi.
+
+Các loại thông điệp truyền tệp:
+
+Đối với nhóm API này, thông điệp truyền tệp sử dụng quy ước FILE_<ACTION>.
+
+Ví dụ:
+
+| Message type | Payload action | Mục đích |
+|---|---|---|
+| FILE_START | START | Bắt đầu phiên truyền tệp |
+| FILE_CHUNK | CHUNK | Truyền một phần dữ liệu |
+| FILE_END | END | Thông báo đã gửi hết dữ liệu |
+| FILE_CANCEL | CANCEL | Yêu cầu hủy truyền tệp |
+| FILE_ERROR | ERROR | Thông báo lỗi truyền tệp |
+
+Các loại trên phản ánh cấu trúc được triển khai trong nhánh TCPSender và các thông điệp liên quan. Việc một loại thông điệp có trong mã nguồn không đồng nghĩa tất cả các luồng giao diện đều sử dụng loại đó.
+
+Ví dụ FILE_START:
+
+```json
+{
+  "header": {
+    "message_id": "550e8400-e29b-41d4-a716-446655440003",
+    "message_type": "FILE_START",
+    "sender_id": "peer_A",
+    "receiver_id": "peer_B",
+    "timestamp": "2026-11-21T10:02:00+00:00"
+  },
+  "payload": {
+    "action": "START",
+    "transfer_id": "550e8400-e29b-41d4-a716-446655440004",
+    "file_name": "baocao.pdf",
+    "file_size": 102400,
+    "sha256": "GIA_TRI_SHA256_CUA_TEP"
+  }
+}
+```
+
+Trong thông điệp này:
+
+- transfer_id xác định phiên truyền tệp.
+
+- file_name là tên tệp cần truyền.
+
+- file_size là kích thước tệp tính bằng byte.
+
+- sha256 là giá trị băm dùng để hỗ trợ kiểm tra tính toàn vẹn.
+
+validate_message() yêu cầu payload.action phải khớp với hậu tố của message_type. Ví dụ, FILE_START phải đi kèm action là START.
+
+b. Cấu trúc JSON Header kết hợp Binary Payload
+
+Nhóm API pack_message() và read_message() sử dụng một đối tượng Header dạng JSON kết hợp với Payload nhị phân tùy chọn.
+
+Cấu trúc dữ liệu được truyền:
+
+[4-byte Header Length] + [JSON Header UTF-8] + [Binary Payload]
+
+Các trường Header thường xuất hiện:
+
+| Trường | Kiểu dữ liệu | Ý nghĩa |
+|---|---|---|
+| msg_id | String (UUID) |Định danh thông điệp |
+| type | String | Loại thông điệp |
+| sender | String | Tên hoặc định danh bên gửi |
+| timestamp | Number | Thời điểm tạo thông điệp dạng Unix timestamp |
+| payload_size | Integer | Số byte của Payload nhị phân đi kèm |
+
+Khác với nhóm JSON Message, nhóm này sử dụng các trường msg_id, type, sender thay cho message_id, message_type, sender_id.
+
+Ví dụ JSON Header của tin nhắn Chat:
+
+```json
+{
+  "msg_id": "550e8400-e29b-41d4-a716-446655440005",
+  "type": "chat",
+  "sender": "Alice",
+  "text": "Xin chào Bob!",
+  "is_encrypted": false,
+  "nonce": null,
+  "timestamp": 1795255200.0,
+  "payload_size": 0
+}
+```
+
+Đây là ví dụ minh họa cấu trúc Header được tạo từ make_chat_header() và bổ sung trường payload_size khi đóng gói bằng pack_message().
+
+Trong nhóm API này, thông điệp Chat có thể chứa các trường metadata bổ sung.
+
+**Reply**:
+
+Trường reply_to được sử dụng để lưu thông tin tham chiếu đến tin nhắn được trả lời. Tin nhắn phản hồi vẫn có type là chat.
+
+Ví dụ phần metadata:
+
+```json
+{
+  "reply_to": {
+    "msg_id": "550e8400-e29b-41d4-a716-446655440001",
+    "sender": "Bob",
+    "content": "Bạn khỏe không?"
+  }
+}
+```
+
+**Forward**:
+
+Trường forward_from được dùng để lưu thông tin nguồn của nội dung được chuyển tiếp. Thông điệp gửi đi vẫn sử dụng loại chat.
+
+Ví dụ phần metadata:
+
+```json
+{
+  "forward_from": {
+    "original_sender": "Alice"
+  }
+}
+```
+
+Các ví dụ Reply và Forward trên chỉ minh họa nguyên lý sử dụng metadata, không được xem là schema bắt buộc đã được validate_message() kiểm tra.
+
+c. Thông điệp bắt tay và trao đổi khóa
+
+Nhóm API tạo Header còn cung cấp các loại thông điệp:
+
+| Type | Mục đích |
+|---|---|
+| handshake | Khởi tạo quá trình bắt tay ở tầng ứng dụng |
+| handshake_ack | Phản hồi thông tin bắt tay |
+| key_exchange | Trao đổi dữ liệu phục vụ thiết lập khóa phiên |
+
+Các trường được sử dụng trong các Header này bao gồm sender, listen_port, rsa_public_key và encrypted_key, tùy loại thông điệp.
+
+Cần phân biệt cơ chế bắt tay ở tầng ứng dụng với Three-way Handshake của TCP. TCP Handshake thiết lập kết nối truyền tải, còn cơ chế bắt tay ở tầng ứng dụng phục vụ trao đổi thông tin và thiết lập phiên giao tiếp.
+
+Phạm vi xác thực khóa công khai và bảo vệ dữ liệu được trình bày riêng ở mục 2.7 dựa trên các thành phần bảo mật đang được tích hợp.
+
+Ngoài các Header `handshake`, `handshake_ack` và `key_exchange` của luồng GUI, module `CODE/security/handshake.py` còn triển khai thông điệp JSON có `message_type` là `KEY_EXCHANGE`, với các hành động `PUBLIC_KEY`, `SESSION_KEY` và `KEY_CONFIRM`. Đây là cơ chế trao đổi khóa thuộc nhóm API bảo mật sử dụng SessionCrypto, cần được phân biệt với cơ chế trao đổi khóa của CryptoManager.
+
+d. Phân biệt hai nhóm cấu trúc thông điệp
+
+| Tiêu chí | JSON Message  | JSON Header + Binary Payload |
+| API | encode_message(), recv_message() | pack_message(), read_message() |
+| ID thông điệp | message_id | msg_id |
+| Loại thông điệp | message_type | type |
+| Thời gian | ISO 8601 UTC | Unix timestamp |
+| Payload | Đối tượng JSON | Chuỗi byte tùy chọn |
+| Độ dài 4 byte đầu | Độ dài toàn bộ JSON Message | Độ dài JSON Header |
+
+Hai nhóm định dạng có cấu trúc và cách giải mã khác nhau, vì vậy bên gửi và bên nhận phải sử dụng cặp API tương thích.
+
+Việc xác định nhóm API nào được sử dụng phụ thuộc vào luồng xử lý cụ thể trong sender.py, listener.py và các thành phần tích hợp GUI.
 
 ### 2.5.3. Đóng gói và truyền dữ liệu JSON qua TCP:
-TCP là giao thức truyền dữ liệu dưới dạng luồng byte liên tục. TCP bảo đảm thứ tự các byte được truyền nhưng không duy trì ranh giới giữa những thông điệp do ứng dụng gửi.
+TCP là giao thức truyền dữ liệu dưới dạng luồng byte liên tục (byte stream), không tự bảo toàn ranh giới giữa các thông điệp ở tầng ứng dụng. Do đó, khi một Peer gửi nhiều thông điệp liên tiếp, phía nhận không thể mặc định rằng mỗi lần gọi recv() sẽ trả về đúng một thông điệp hoàn chỉnh.
 
-Vì vậy, khi truyền nhiều thông điệp JSON qua cùng một kết nối TCP, ứng dụng cần có cơ chế xác định điểm bắt đầu và kết thúc của từng thông điệp.
+Để giải quyết vấn đề này, ứng dụng sử dụng cơ chế đóng khung thông điệp (Message Framing), trong đó thông tin về độ dài được đặt trước phần dữ liệu cần truyền.
 
-Một giải pháp thường được sử dụng là Length-Prefix Framing, trong đó độ dài thông điệp được đặt trước nội dung dữ liệu.
+Theo mã nguồn tại CODE/shared/protocol.py, hệ thống cung cấp hai nhóm API đóng khung dữ liệu.
 
-Nguyên lý hoạt động:
-1. Chuyển JSON thành chuỗi byte UTF-8.
-2. Tính độ dài của chuỗi byte.
-3. Đóng gói độ dài thành 4 byte bằng `struct.pack("!I",...)`.
-4. Gửi 4 byte độ dài trước, sau đó gửi nội dung JSON.
-5. Phía nhận đọc 4 byte đầu để biết cần nhận bao nhiêu byte dữ liệu tiếp theo.
+a. JSON Message Framing
 
-Cấu trúc khung dữ liệu minh họa:
+Nhóm API encode_message() và recv_message() sử dụng cấu trúc:
 
-[4-byte Length][JSON UTF-8 Data]
+[4-byte Message Length] + [JSON Message UTF-8]
 
-Trong Python, thư viện struct có thể được sử dụng để chuyển đổi giá trị độ dài thành biểu diễn nhị phân, trong khi json hỗ trợ mã hóa và giải mã nội dung thông điệp.
+Quy trình đóng gói:
 
-Cơ chế Length-Prefix Framing giúp ứng dụng xác định ranh giới từng thông điệp khi trao đổi dữ liệu qua TCP, kể cả trong trường hợp dữ liệu được nhận thành nhiều phần.
+1. Kiểm tra cấu trúc thông điệp bằng hàm validate_message().
+
+2. Chuyển đối tượng Python sang chuỗi JSON bằng json.dumps().
+
+3. Mã hóa chuỗi JSON thành dữ liệu byte theo UTF-8.
+
+4. Xác định kích thước thông điệp bằng số byte sau khi mã hóa.
+
+5. Chuyển kích thước thành một số nguyên không dấu 4 byte theo thứ tự byte mạng (big-endian).
+
+6. Ghép phần độ dài và phần JSON đã mã hóa thành một khung dữ liệu hoàn chỉnh.
+
+7. Hàm encode_message() áp dụng giới hạn MAX_MESSAGE_SIZE = 1024 * 1024 byte (1 MiB) đối với phần JSON Message.
+
+Quy trình tiếp nhận:
+
+1. Phía nhận đọc đủ 4 byte đầu tiên để xác định độ dài thông điệp.
+
+2. Giải mã giá trị độ dài theo định dạng big-endian.
+
+3. Kiểm tra độ dài hợp lệ và không vượt quá MAX_MESSAGE_SIZE.
+
+4. Đọc đủ số byte JSON theo độ dài đã xác định.
+
+5. Giải mã UTF-8 thành chuỗi JSON.
+
+6. Chuyển JSON về đối tượng Python và kiểm tra cấu trúc thông điệp.
+
+Trong nhóm API này, độ dài được tính theo số byte UTF-8, không phải số ký tự. Điều này đặc biệt quan trọng khi nội dung chứa tiếng Việt hoặc emoji vì một ký tự có thể chiếm nhiều byte.
+
+b. JSON Header kết hợp Binary Payload Framing
+
+Nhóm API pack_message() và read_message() sử dụng cấu trúc:
+
+[4-byte Header Length] + [JSON Header UTF-8] + [Binary Payload]
+
+Quy trình đóng gói:
+
+1. Tạo hoặc nhận đối tượng Header dưới dạng Python dictionary.
+
+2. Bổ sung trường payload_size để xác định kích thước Payload nhị phân.
+
+3. Bổ sung msg_id và timestamp nếu Header chưa có các trường này.
+
+4. Chuyển Header thành JSON và mã hóa theo UTF-8.
+
+5. Tính số byte của JSON Header.
+
+6. Đóng gói độ dài Header thành 4 byte theo thứ tự big-endian.
+
+7. Ghép phần độ dài Header, JSON Header và Payload nhị phân thành dữ liệu truyền.
+
+Quy trình tiếp nhận:
+
+1. Đọc đủ 4 byte chứa độ dài JSON Header.
+
+2. Giải mã độ dài Header và kiểm tra giới hạn.
+
+3. Đọc đủ số byte JSON Header.
+
+4. Giải mã JSON Header và lấy giá trị payload_size.
+
+5. Nếu payload_size lớn hơn 0, tiếp tục đọc số byte Payload tương ứng.
+
+6. Trả về hai thành phần (header, payload) để module tiếp nhận xử lý.
+
+Trong read_message(), giới hạn MAX_HEADER_SIZE = 1024 * 1024 byte (1 MiB) được áp dụng cho JSON Header. Giới hạn này không đồng nghĩa toàn bộ khung dữ liệu, bao gồm Binary Payload, có kích thước tối đa 1 MiB.
+
+c. Cơ chế đọc đủ dữ liệu bằng recv_exact()
+
+Do TCP không bảo đảm số byte nhận được trong một lần gọi recv() bằng số byte đã yêu cầu, ứng dụng sử dụng hàm recv_exact() để tiếp nhận dữ liệu theo đúng độ dài.
+
+Hàm này thực hiện vòng lặp:
+
+1. Khởi tạo vùng đệm dữ liệu.
+
+2. Gọi recv() để nhận phần dữ liệu còn thiếu.
+
+3. Bổ sung dữ liệu nhận được vào vùng đệm.
+
+4. Tiếp tục đọc cho đến khi đạt đủ số byte yêu cầu.
+
+5. Nếu kết nối bị đóng trước khi nhận đủ dữ liệu, phát sinh ngoại lệ.
+
+Cơ chế này được sử dụng trong cả recv_message() và read_message() nhằm bảo đảm phía nhận lấy đủ số byte cần thiết để tái tạo thông điệp.
+
+d. So sánh hai cơ chế đóng khung
+
+| Tiêu chí | JSON Message Framing | Header + Binary Payload Framing |
+|---|---|---|
+| Hàm đóng gói | encode_message() | pack_message() |
+| Hàm tiếp nhận | recv_message() | read_message() |
+| Ý nghĩa 4 byte đầu | Độ dài toàn bộ JSON Message | Độ dài JSON Header |
+| Nội dung | Đối tượng JSON | JSON Header và Payload nhị phân |
+| Giới hạn được định nghĩa | MAX_MESSAGE_SIZE = 1 MiB | MAX_HEADER_SIZE = 1 MiB |
+| Cơ chế đọc đủ byte | recv_exact() | recv_exact() |
+
+Hai cơ chế đóng khung có cách xác định độ dài khác nhau. Vì vậy, bên gửi và bên nhận phải sử dụng các hàm tương thích để tránh lỗi giải mã hoặc đọc sai dữ liệu.
+
+Việc sử dụng Message Framing giúp hệ thống xác định ranh giới thông điệp trên luồng TCP, tạo cơ sở cho quá trình xử lý tin nhắn, trao đổi thông tin điều khiển và truyền dữ liệu giữa các Peer.
 
 ## 2.6. Lập trình đa luồng và QThread
-### 2.6.1. Khái niệm lập trình đa luồng 
-Thread (luồng) là một đơn vị thực thi bên trong tiến trình (Process). Một tiến trình có thể chứa nhiều luồng thực thi, cho phép tổ chức và xử lý các tác vụ khác nhau trong cùng một chương trình.
 
-Lập trình đa luồng (Multithreading) là kỹ thuật sử dụng nhiều luồng nhằm tổ chức các công việc có thể diễn ra đồng thời hoặc xen kẽ trong quá trình thực thi ứng dụng.
+### 2.6.1. Khái niệm lập trình đa luồng
 
-Trong các ứng dụng mạng có giao diện đồ họa, những thao tác như chờ kết nối, nhận dữ liệu từ Socket hoặc đọc và ghi tệp có thể mất nhiều thời gian. Nếu các thao tác này được thực hiện trực tiếp trong luồng giao diện, chương trình có thể bị gián đoạn khả năng phản hồi với người dùng.
+Lập trình đa luồng (Multithreading) là kỹ thuật cho phép một tiến trình thực hiện nhiều luồng xử lý đồng thời. Các luồng trong cùng một tiến trình có thể chia sẻ bộ nhớ và tài nguyên của chương trình.
 
-Vì vậy, các tác vụ xử lý mạng và dữ liệu thường được chuyển sang những luồng xử lý riêng để duy trì khả năng phản hồi của giao diện.
+Trong ứng dụng mạng có giao diện đồ họa, lập trình đa luồng giúp tách các tác vụ giao tiếp mạng khỏi luồng xử lý giao diện. Những thao tác có thể mất nhiều thời gian như chờ kết nối TCP, tiếp nhận dữ liệu, phát hiện Peer và truyền tệp có thể được thực hiện trên các luồng nền.
 
-Một số vai trò luồng thường gặp:
-| Thread | Vai trò |
+Việc tổ chức đa luồng phù hợp giúp:
+
+- Duy trì khả năng phản hồi của giao diện.
+- Hỗ trợ xử lý nhiều kết nối mạng.
+- Hỗ trợ gửi và nhận dữ liệu đồng thời.
+- Hạn chế việc các tác vụ mạng làm gián đoạn thao tác của người dùng.
+
+### 2.6.2. QThread trong PyQt6
+
+QThread là lớp được cung cấp bởi Qt để quản lý luồng thực thi trong ứng dụng.
+
+Trong đề tài P2P Chat & File Transfer Application, QThread được sử dụng thông qua module `PyQt6.QtCore`.
+
+Các thành phần liên quan bao gồm:
+
+| Thành phần | Chức năng |
 |---|---|
-| Main Thread | xử lý sự kiện và cập nhật giao diện người dùng |
-| Network Thread | thực hiện các thao tác gửi và nhận dữ liệu mạng |
-| Discovery Thread | thực hiện các hoạt động phát hiện thiết bị |
-| File Transfer Worker | xử lý đọc, ghi và truyền dữ liệu tệp | 
+| `QThread` | Quản lý và thực thi tác vụ trên luồng riêng |
+| `start()` | Khởi động luồng |
+| `run()` | Chứa nội dung xử lý của luồng |
+| `wait()` | Chờ luồng kết thúc |
+| `isRunning()` | Kiểm tra trạng thái hoạt động của luồng |
+| `pyqtSignal` | Khai báo tín hiệu phục vụ trao đổi thông tin giữa các thành phần |
 
-Việc sử dụng nhiều luồng giúp phân tách trách nhiệm xử lý, nhưng cũng đặt ra yêu cầu đồng bộ khi các luồng cùng truy cập tài nguyên hoặc dữ liệu dùng chung
+Ngoài QThread, ứng dụng còn sử dụng `threading.Thread` của Python để thực hiện một số tác vụ xử lý kết nối TCP.
 
-### 2.6.2. Cơ chế QThread trong Qt 
-QThread là lớp do Qt cung cấp để quản lý luồng thực thi trong các ứng dụng sử dụng Qt Framework.
+### 2.6.3. Cơ chế Signal và Slot
 
-QThread cho phép tổ chức các tác vụ chạy ngoài luồng giao diện chính. Nhờ đó, các thao tác có khả năng chặn luồng như đọc dữ liệu từ Socket hoặc xử lý tệp có thể được thực hiện mà không trực tiếp làm gián đoạn vòng lặp sự kiện của GUI.
+Signal và Slot là cơ chế giao tiếp giữa các đối tượng trong Qt, cho phép một thành phần phát tín hiệu khi xảy ra sự kiện và các thành phần khác tiếp nhận, xử lý sự kiện đó.
 
-Trong Qt, một cách tổ chức phổ biến là sử dụng đối tượng Worker kế thừa từ QObject, sau đó chuyển Worker sang luồng được quản lý bởi QThread.
+Trong ứng dụng đa luồng, cơ chế Signal/Slot được sử dụng để chuyển thông tin từ luồng xử lý nền đến các thành phần giao diện.
 
-Mô hình này giúp phân tách:
+Ví dụ, khi lớp `PeerDiscovery` phát hiện một Peer mới trong mạng LAN, lớp này phát tín hiệu `peer_discovered` chứa thông tin định danh, tên hiển thị, địa chỉ IP và cổng TCP của Peer.
 
-- Main Thread: tiếp nhận sự kiện, quản lý và cập nhật giao diện.
-- Worker Object: chứa logic xử lý tác vụ.
-- QThread: quản lý luồng thực thi dành cho Worker.
+Giao diện tiếp nhận tín hiệu và cập nhật danh sách Peer tương ứng.
 
-### 2.6.3. Signal và Slot:
-Signal và Slot là cơ chế giao tiếp giữa các đối tượng trong Qt.
+Khi không còn nhận được beacon từ một Peer trong khoảng thời gian vượt quá ngưỡng quy định, `PeerDiscovery` phát tín hiệu `peer_lost` để thông báo sự thay đổi trạng thái.
 
-Signal là tín hiệu được phát ra khi một sự kiện xảy ra, chẳng hạn hoàn thành một tác vụ, nhận được thông điệp hoặc phát sinh lỗi.
+Cơ chế Signal/Slot hỗ trợ tách biệt việc xử lý mạng và việc cập nhật giao diện, hạn chế thao tác trực tiếp lên các thành phần GUI từ luồng nền.
 
-Slot là hàm có thể được kết nối để xử lý tín hiệu tương ứng.
+### 2.6.4. Ứng dụng lập trình đa luồng trong đề tài
 
-Trong các ứng dụng đa luồng, Signal/Slot có thể được sử dụng để truyền kết quả xử lý từ Worker đến đối tượng thuộc Main Thread.
+Ứng dụng P2P Chat & File Transfer Application tổ chức các thành phần xử lý giao diện và giao tiếp mạng theo những vai trò sau:
 
-Ví dụ về luồng xử lý:
+| Thành phần | Cơ chế xử lý | Trách nhiệm |
+|---|---|---|
+| Main Thread | Luồng chính của PyQt6 | Quản lý giao diện và tiếp nhận thao tác người dùng |
+| `PeerDiscovery` | `QThread` | Phát và tiếp nhận UDP beacon, phát hiện Peer mới và Peer mất tín hiệu |
+| `P2PListener` | `QThread` | Lắng nghe và tiếp nhận kết nối TCP từ các Peer khác |
+| TCP Connection Worker | `threading.Thread` | Đọc và chuyển thông điệp nhận được từ từng kết nối TCP đến thành phần xử lý |
+| `TransferManager` | Thành phần quản lý tác vụ truyền tệp | Điều phối các tác vụ truyền tệp và phối hợp với các luồng xử lý liên quan |
 
-1. Worker thực hiện thao tác nhận dữ liệu từ Socket.
-2. Khi nhận được dữ liệu hợp lệ, Worker phát Signal chứa thông tin cần chuyển.
-3. Qt chuyển tín hiệu đến Slot đã đăng ký theo cơ chế kết nối phù hợp.
-4. Slot thuộc Main Thread tiếp nhận dữ liệu và cập nhật giao diện.
+Trong mã nguồn `CODE/p2p_node/listener.py`, lớp `P2PListener` sử dụng QThread để lắng nghe kết nối TCP. Khi tiếp nhận một kết nối, thành phần này có thể tạo một `threading.Thread` riêng để xử lý dữ liệu của kết nối đó.
 
-Khi sử dụng kết nối dạng Queued Connection giữa các đối tượng thuộc những luồng khác nhau, Slot được thực thi trong luồng sở hữu đối tượng nhận, thông qua vòng lặp sự kiện của luồng đó.
+Trong mã nguồn `CODE/p2p_node/discovery.py`, lớp `PeerDiscovery` sử dụng QThread để thực hiện việc gửi và tiếp nhận UDP beacon mà không cần thực hiện vòng lặp Discovery trực tiếp trên luồng giao diện.
 
-Cơ chế này giúp hạn chế việc cập nhật trực tiếp các thành phần GUI từ Worker Thread, qua đó giảm nguy cơ xảy ra lỗi do truy cập giao diện không đúng luồng.
+Đối với chức năng truyền tệp, `TransferManager` và các thành phần xử lý liên quan đảm nhận việc quản lý tác vụ truyền, theo dõi tiến độ và trạng thái.
 
-### 2.6.4. Đồng bộ dữ liệu và quản lý vòng đời luồng:
+Việc phân chia trách nhiệm giữa các luồng giúp giảm sự phụ thuộc giữa xử lý giao diện và xử lý mạng, đồng thời hỗ trợ ứng dụng thực hiện nhiều tác vụ giao tiếp giữa các Peer.
 
-Khi nhiều luồng cùng truy cập hoặc thay đổi dữ liệu dùng chung, có thể xảy ra tình trạng tranh chấp dữ liệu (Race Condition).
+Tuy nhiên, khi nhiều luồng cùng truy cập tài nguyên hoặc dữ liệu dùng chung, chương trình cần có cơ chế đồng bộ phù hợp để hạn chế xung đột và bảo đảm tính nhất quán của dữ liệu.
 
-Để hạn chế vấn đề này, hệ thống có thể sử dụng các cơ chế đồng bộ như:
+![Mô hình phân chia trách nhiệm xử lý đa luồng trong ứng dụng P2P](image-6.png)
 
-- Mutex/Lock: Bảo vệ dữ liệu hoặc tài nguyên dùng chung khỏi các thao tác truy cập đồng thời không an toàn.
-- Queue: Tổ chức việc trao đổi dữ liệu hoặc phân phối công việc giữa những luồng xử lý.
-- Signal/Slot: Truyền thông tin giữa các đối tượng theo cơ chế sự kiện của Qt.
-
-Ngoài vấn đề đồng bộ, vòng đời của luồng cũng cần được quản lý phù hợp.
-
-Khi tác vụ hoàn thành hoặc ứng dụng kết thúc, hệ thống cần yêu cầu Worker dừng xử lý, giải phóng tài nguyên liên quan và bảo đảm luồng được kết thúc an toàn.
-
-Việc quản lý không phù hợp có thể dẫn đến tình trạng luồng tiếp tục hoạt động ngoài ý muốn, tài nguyên không được giải phóng hoặc ứng dụng không thể kết thúc bình thường.
-
-### 2.6.5. Ứng dụng trong dự án:
-Đối với ứng dụng Peer-to-Peer có giao diện đồ họa, lập trình đa luồng đóng vai trò quan trọng trong việc tổ chức các tác vụ mạng và duy trì khả năng phản hồi của giao diện.
-
-Các tác vụ có thể được tổ chức xử lý ngoài Main Thread bao gồm:
-
-Lắng nghe các thông điệp UDP Discovery.
-
-Chờ và tiếp nhận kết nối TCP.
-
-Gửi và nhận thông điệp từ các Peer.
-
-Đọc, ghi và truyền dữ liệu tệp.
-
-Thực hiện những thao tác xử lý mạng có thời gian chờ.
-
-Khi kết hợp với Signal/Slot, Worker có thể chuyển kết quả xử lý về Main Thread để cập nhật danh sách Peer, hiển thị tin nhắn, trạng thái kết nối hoặc tiến độ truyền tệp.
-
-Nhờ đó, giao diện có thể tiếp tục tiếp nhận thao tác của người dùng trong khi các hoạt động mạng được xử lý ở những luồng khác.
-
-Tuy nhiên, việc sử dụng đa luồng cần đi kèm với cơ chế quản lý tài nguyên và đồng bộ dữ liệu để bảo đảm tính ổn định của ứng dụng. 
 ## 2.7. Mã hóa lai RSA và AES-256
-### 2.7.1. Mã hóa đối xứng và thuật toán AES-256: 
-Mã hóa đối xứng (Symmetric Encryption) là phương pháp mã hóa trong đó bên gửi và bên nhận sử dụng cùng một khóa bí mật để mã hóa và giải mã dữ liệu.
 
-AES (Advanced Encryption Standard) là thuật toán mã hóa khối đối xứng được sử dụng rộng rãi trong các hệ thống bảo mật thông tin. AES hỗ trợ các độ dài khóa 128 bit, 192 bit và 256 bit.
+### 2.7.1. Thuật toán AES-256
 
-Trong đó, AES-256 sử dụng khóa có độ dài 256 bit (32 byte), phù hợp để bảo vệ dữ liệu trong quá trình trao đổi giữa các thiết bị.
+AES (Advanced Encryption Standard) là thuật toán mã hóa đối xứng, trong đó bên gửi và bên nhận sử dụng cùng một khóa bí mật để thực hiện mã hóa và giải mã dữ liệu.
 
-Một số đặc điểm của AES:
+AES-256 sử dụng khóa có độ dài 256 bit, tương đương 32 byte.
 
-- Có hiệu năng phù hợp để xử lý lượng dữ liệu lớn.
+Các đặc điểm của AES-256:
 
-- Có thể ứng dụng để mã hóa thông điệp văn bản và nội dung tệp.
+- Có hiệu suất mã hóa và giải mã phù hợp với nhiều loại dữ liệu.
+- Phù hợp với việc mã hóa nội dung tin nhắn và dữ liệu tệp.
+- Có thể kết hợp với các thuật toán mã hóa bất đối xứng để xây dựng cơ chế mã hóa lai.
 
-- Yêu cầu bên gửi và bên nhận sử dụng khóa mã hóa tương ứng.
+Trong đề tài, AES được sử dụng kết hợp với chế độ GCM (Galois/Counter Mode).
 
-- Cần kết hợp với chế độ hoạt động phù hợp để bảo đảm yêu cầu bảo mật.
+AES-GCM là cơ chế mã hóa có xác thực (Authenticated Encryption), giúp bảo vệ tính bí mật của dữ liệu và kiểm tra tính toàn vẹn của nội dung được mã hóa.
 
-Chế độ mã hóa AES-GCM
+Các thành phần chính gồm:
 
-GCM (Galois/Counter Mode) là chế độ mã hóa có xác thực (Authenticated Encryption), kết hợp khả năng bảo mật nội dung với kiểm tra tính toàn vẹn của dữ liệu.
-
-Khi sử dụng AES-GCM, quá trình mã hóa có thể sử dụng các thành phần:
-| Thành phần | Vai trò |
+| Thành phần | Ý nghĩa |
 |---|---|
-| Key | khóa bí mật dùng để mã hóa và giải mã |
-| Nonce | Giá trị sử dụng cho một lần mã hóa, phải bảo đẩm không bị trùng với cùng khóa |
-| Plaintext | Dữ liệu ban đầu |
+| Key | Khóa bí mật được sử dụng để mã hóa và giải mã |
+| Plaintext | Dữ liệu ban đầu chưa được mã hóa |
 | Ciphertext | Dữ liệu sau khi mã hóa |
-| Authentication Tag | Giá trị dùng để kiếm tra tính toàn vẹn và xác thực dữ liệu |
-| AAD | Dữ liệu bổ sung được xác thực nhưng không mã hóa | 
+| Nonce | Giá trị được sử dụng trong một lần mã hóa, không được tái sử dụng với cùng khóa |
+| Authentication Tag | Giá trị xác thực dùng để kiểm tra tính toàn vẹn của dữ liệu mã hóa |
 
-Khi giải mã, hệ thống kiểm tra Authentication Tag. Nếu dữ liệu đã bị thay đổi hoặc quá trình xác thực thất bại, thông điệp sẽ không được chấp nhận
+Khả năng bảo mật của AES-GCM phụ thuộc vào việc quản lý khóa, nonce và cách tích hợp thuật toán vào hệ thống.
 
-### 2.7.2. Mã hóa bất đối xứng và thuật toán RSA:
-Mã hóa bất đối xứng (Asymmetric Encryption) sử dụng một cặp khóa có quan hệ toán học với nhau, gồm khóa công khai (Public Key) và khóa riêng (Private Key).
+### 2.7.2. Thuật toán RSA
 
-RSA là một thuật toán mật mã bất đối xứng có thể được sử dụng để bảo vệ dữ liệu kích thước nhỏ, chẳng hạn khóa phiên dùng trong mã hóa đối xứng.
-| Khóa | Chức năng |
+RSA là thuật toán mật mã bất đối xứng sử dụng một cặp khóa có quan hệ toán học với nhau.
+
+| Thành phần | Chức năng |
 |---|---|
-| Public Key | Khóa công khai, có thể chia sẻ cho người khác. |
-| Private Key | Khóa riêng tư, được giữ bí mật, dùng để giải mã dữ liệu đã được mã hóa bằng Public Key tương ứng. |
+| Public Key | Khóa công khai, có thể được chia sẻ cho các bên khác |
+| Private Key | Khóa riêng, phải được giữ bí mật bởi chủ sở hữu |
 
-rong quá trình trao đổi khóa, bên gửi có thể sử dụng Public Key của bên nhận để mã hóa một khóa bí mật. Chỉ bên sở hữu Private Key tương ứng mới có thể giải mã khóa đó.
+Trong cơ chế trao đổi khóa của ứng dụng, khóa công khai RSA được sử dụng để mã hóa khóa phiên AES, trong khi khóa riêng tương ứng được sử dụng để giải mã khóa phiên.
 
-RSA-OAEP
+Mã nguồn của đề tài sử dụng RSA với độ dài khóa 2048 bit, kết hợp cơ chế OAEP và hàm băm SHA-256.
 
-RSA-OAEP (Optimal Asymmetric Encryption Padding) là cơ chế đệm được sử dụng trong mã hóa RSA nhằm tăng cường an toàn so với việc áp dụng RSA trực tiếp mà không có cơ chế đệm phù hợp.
+RSA-OAEP là cơ chế mã hóa RSA sử dụng kỹ thuật đệm xác suất nhằm tăng cường tính an toàn của quá trình mã hóa.
 
-RSA-OAEP có thể kết hợp với SHA-256 trong quá trình mã hóa và giải mã khóa phiên.
+Do RSA có chi phí tính toán lớn hơn mã hóa đối xứng và giới hạn kích thước dữ liệu đầu vào, hệ thống sử dụng RSA chủ yếu để bảo vệ khóa phiên thay vì mã hóa trực tiếp toàn bộ nội dung tệp.
 
-Tuy nhiên, việc nhận được Public Key không đồng nghĩa với việc đã xác thực danh tính của chủ sở hữu khóa. Các hệ thống cần có cơ chế kiểm tra hoặc xác thực Public Key để hạn chế nguy cơ tấn công trung gian (Man-in-the-Middle).
+### 2.7.3. Nguyên lý mã hóa lai RSA và AES-256
 
-### 2.7.3. Mã hóa lai RSA + AES-256:
-Mã hóa lai (Hybrid Encryption) là phương pháp kết hợp mã hóa bất đối xứng và mã hóa đối xứng nhằm tận dụng ưu điểm của cả hai cơ chế.
+Mã hóa lai (Hybrid Encryption) là cơ chế kết hợp mật mã bất đối xứng và mật mã đối xứng nhằm tận dụng ưu điểm của từng nhóm thuật toán.
 
 Trong mô hình này:
 
-- RSA được sử dụng để bảo vệ quá trình trao đổi khóa phiên.
+- RSA được sử dụng để bảo vệ khóa phiên trong quá trình trao đổi khóa.
+- AES-256 được sử dụng để mã hóa dữ liệu trong phiên giao tiếp.
 
-- AES-256 được sử dụng để mã hóa dữ liệu trao đổi.
+Quy trình nguyên lý giữa hai Peer được mô tả như sau:
 
-- AES-GCM hỗ trợ kiểm tra tính toàn vẹn và xác thực dữ liệu mã hóa.
+1. Các Peer khởi tạo cặp khóa RSA và giữ bí mật khóa riêng.
+2. Hai Peer trao đổi thông tin khóa công khai.
+3. Một Peer tạo khóa phiên AES-256 ngẫu nhiên.
+4. Khóa phiên được mã hóa bằng khóa công khai RSA của Peer đối tác.
+5. Khóa phiên đã được mã hóa được truyền đến Peer đối tác.
+6. Peer nhận sử dụng khóa riêng RSA của mình để khôi phục khóa phiên.
+7. Sau khi thiết lập khóa phiên, các Peer sử dụng AES để mã hóa và giải mã dữ liệu thuộc phạm vi bảo vệ của phiên giao tiếp.
 
-Nguyên lý hoạt động:
-1. Peer B tạo cặp khóa RSA → B có public key và private key.
-2. Peer B gửi Public Key cho Peer A.
-3. Peer A tạo khóa AES-256 ngẫu nhiên: dùng để mã hóa nội dung tin nhắn.
-4. Peer A mã hóa tin nhắn bằng AES-256.
-5. Peer A mã hóa khóa AES bằng Public key của B: sử dụng RSA-OAEP để bảo vệ khóa AES khi truyền đi.
-6. Peer A gửi dữ liệu cho Peer B: gồm tin nhắn mã hóa và khóa AES đã được RSA mã hóa.
-7. Peer B giải mã khóa AES: dùng private key của B để lấy lại khóa AES ban đầu.
-8. Peer B giải mã nội dung: dùng khóa AES vừa khôi phục để giải mã tin nhắn mã hóa và đọc tin nhắn. 
+Quy trình trên mô tả nguyên lý chung của mã hóa lai. Trình tự thông điệp và cách quản lý khóa thực tế phụ thuộc vào cơ chế handshake được triển khai trong ứng dụng.
 
-Khóa phiên chỉ được sử dụng trong phạm vi được quy định cho phiên giao tiếp. Việc sử dụng khóa phiên riêng giúp hạn chế phụ thuộc vào một khóa đối xứng cố định cho toàn bộ quá trình hoạt động của ứng dụng.
+Việc trao đổi khóa công khai cần đi kèm cơ chế xác thực phù hợp để hạn chế nguy cơ tấn công trung gian (Man-in-the-Middle).
 
-### 2.7.4. Ứng dụng trong dự án:
-Trong ứng dụng Peer-to-Peer, các thiết bị có thể thiết lập kết nối trực tiếp để trao đổi dữ liệu mà không cần máy chủ trung tâm chuyển tiếp nội dung.
+![Nguyên lý trao đổi khóa và mã hóa lai RSA/AES](image-8.png)
 
-Tuy nhiên, việc thiết lập kết nối TCP không tự động bảo đảm tính bí mật hoặc xác thực danh tính của các thiết bị tham gia.
+### 2.7.4. Ứng dụng cơ chế bảo mật trong đề tài
 
-Do đó, cơ chế mã hóa lai có thể được sử dụng ở tầng ứng dụng nhằm bảo vệ dữ liệu trong quá trình truyền nhận.
+Theo mã nguồn tích hợp, hệ thống có hai nhóm thành phần triển khai bảo mật tương ứng với các cơ chế truyền thông được trình bày tại mục 2.5.
 
-Các mục đích chính bao gồm:
+**a. Cơ chế bảo mật sử dụng CryptoManager**
 
-- Bảo mật nội dung: Hạn chế việc bên không có khóa phù hợp đọc được dữ liệu trao đổi.
+Lớp `CryptoManager` trong `CODE/security/crypto_manager.py` được tích hợp vào giao diện chính thông qua `CODE/ui/app.py`.
 
-- Kiểm tra tính toàn vẹn: Phát hiện dữ liệu mã hóa bị thay đổi khi sử dụng chế độ mã hóa có xác thực.
+Các chức năng được triển khai bao gồm:
 
-- Quản lý khóa phiên: Sử dụng khóa riêng cho từng phiên giao tiếp thay vì phụ thuộc vào một khóa đối xứng cố định.
+- Khởi tạo cặp khóa RSA-2048 khi tạo đối tượng quản lý bảo mật.
+- Xuất khóa công khai dưới định dạng PEM.
+- Tiếp nhận và quản lý khóa công khai của các Peer khác.
+- Sinh khóa phiên AES-256 ngẫu nhiên.
+- Mã hóa và giải mã khóa phiên bằng RSA-OAEP-SHA256.
+- Mã hóa và giải mã dữ liệu bằng AES-256-GCM.
+- Tính toán và kiểm tra mã băm SHA-256.
 
-- Hỗ trợ trao đổi dữ liệu: Áp dụng cơ chế mã hóa cho thông điệp và dữ liệu tệp theo thiết kế của hệ thống.
+Quá trình trao đổi thông tin bảo mật của luồng GUI sử dụng các loại thông điệp `handshake`, `handshake_ack` và `key_exchange`.
 
-Việc triển khai cần bảo đảm khóa riêng được bảo vệ, khóa phiên được tạo bằng phương pháp an toàn và các giá trị Nonce không bị sử dụng trùng với cùng một khóa.
+Các thông điệp này được tạo thông qua những hàm tương ứng trong `CODE/shared/protocol.py` và được xử lý bởi các thành phần trong `CODE/ui/app.py` và `CODE/p2p_node/handler.py`.
 
-Ngoài ra, hệ thống cần kiểm tra khóa công khai của Peer, xử lý lỗi giải mã và quản lý vòng đời khóa phiên nhằm giảm thiểu các rủi ro bảo mật trong quá trình giao tiếp.
+Đối với tin nhắn và dữ liệu tệp, các trường như `is_encrypted` và `nonce` được sử dụng để hỗ trợ xác định và xử lý dữ liệu đã mã hóa.
 
+Việc mã hóa nội dung phụ thuộc vào trạng thái thiết lập khóa phiên và luồng xử lý tương ứng.
+
+**b. Cơ chế bảo mật sử dụng SessionCrypto**
+
+Bên cạnh `CryptoManager`, hệ thống còn có các thành phần trong `CODE/security/crypto.py` và `CODE/security/handshake.py`.
+
+Các module này cung cấp những chức năng:
+
+- Khởi tạo và quản lý cặp khóa RSA.
+- Trao đổi khóa phiên AES-256.
+- Sử dụng HKDF để dẫn xuất khóa theo từng chiều giao tiếp.
+- Mã hóa và giải mã thông điệp bằng AES-256-GCM.
+- Kiểm tra số thứ tự thông điệp để hỗ trợ phát hiện dữ liệu bị phát lại.
+- Cung cấp cơ chế mã hóa từng chunk của tệp.
+- Tạo fingerprint từ khóa công khai để hỗ trợ việc xác minh khóa.
+
+Module `handshake.py` triển khai quá trình bắt tay thông qua nhóm thông điệp `KEY_EXCHANGE`, bao gồm các hành động `PUBLIC_KEY`, `SESSION_KEY` và `KEY_CONFIRM`.
+
+Sau khi quá trình bắt tay thành công, các hàm `send_secure()` và `recv_secure()` cung cấp cơ chế gửi và nhận thông điệp đã mã hóa.
+
+Cần phân biệt nhóm API này với luồng `CryptoManager` được tích hợp trong GUI. Các cơ chế có trong một module bảo mật không mặc nhiên được áp dụng cho toàn bộ chức năng của ứng dụng.
+
+**c. Vai trò của các thuật toán và cơ chế bảo mật**
+
+| Thuật toán hoặc cơ chế | Vai trò |
+|---|---|
+| RSA-2048 | Bảo vệ khóa phiên trong quá trình trao đổi khóa |
+| RSA-OAEP-SHA256 | Cơ chế mã hóa khóa phiên bằng RSA |
+| AES-256-GCM | Mã hóa và xác thực tính toàn vẹn của dữ liệu được bảo vệ |
+| SHA-256 | Tạo mã băm phục vụ đối chiếu tính toàn vẹn dữ liệu |
+| HKDF | Dẫn xuất khóa mật mã trong cơ chế SessionCrypto |
+| Public Key Fingerprint | Hỗ trợ nhận diện và xác minh khóa công khai |
+
+### 2.7.5. Phạm vi và giới hạn bảo mật
+
+Việc sử dụng RSA và AES-GCM giúp xây dựng cơ chế bảo vệ dữ liệu trao đổi giữa các Peer. Tuy nhiên, mức độ bảo mật thực tế còn phụ thuộc vào quá trình thiết lập phiên, xác thực khóa công khai và cách sử dụng các API mã hóa.
+
+Các thông điệp UDP Discovery và thông tin điều khiển phục vụ thiết lập kết nối không mặc nhiên được mã hóa bằng AES-256-GCM.
+
+SHA-256 hỗ trợ kiểm tra tính toàn vẹn khi có giá trị băm đối chiếu phù hợp, nhưng bản thân hàm băm không phải là thuật toán mã hóa và không tự xác thực danh tính của Peer gửi.
+
+Ngoài ra, việc tạo fingerprint của khóa công khai không đồng nghĩa khóa đó đã được xác thực bởi người dùng hoặc một nguồn đáng tin cậy.
+
+Vì vậy, khả năng chống tấn công trung gian, bảo vệ toàn bộ lưu lượng và phạm vi mã hóa thực tế cần được đánh giá dựa trên luồng tích hợp và kết quả kiểm thử cụ thể của ứng dụng.
