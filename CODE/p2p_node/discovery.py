@@ -196,7 +196,14 @@ class PeerDiscovery(QThread):
 
                     if beacon.get("instance_id") == self._instance_id:
                         continue
-                    if peer_port == self.listen_port and (ip in ("127.0.0.1", "localhost") or ip.startswith("192.168.")):
+                    # Chỉ bỏ qua nếu gói beacon xuất phát từ chính máy cục bộ và trùng cổng lắng nghe
+                    is_loopback = ip in ("127.0.0.1", "localhost", "::1")
+                    local_ips = {"127.0.0.1", "localhost", "::1"}
+                    try:
+                        local_ips.update(socket.gethostbyname_ex(socket.gethostname())[2])
+                    except Exception:
+                        pass
+                    if peer_port == self.listen_port and (is_loopback or ip in local_ips):
                         continue
 
                     peer_id = f"{ip}:{peer_port}"

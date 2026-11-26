@@ -1,4 +1,4 @@
-# Quy ước làm việc với Git
+\# Quy ước làm việc với Git
 
 Nhóm làm việc theo mô hình **nhánh tính năng → `main`**.
 

@@ -171,6 +171,7 @@ class MessageHandler(QObject):
                 "timestamp": header.get("timestamp", time.time()),
                 "reply_to": header.get("reply_to"),
                 "forward_from": header.get("forward_from"),
+                "group_id": header.get("group_id"),
             }
             log.info(f"Nhận tin nhắn từ {key_id} ({sender}): {text}")
             self.chat_received.emit(peer_id, msg_data)

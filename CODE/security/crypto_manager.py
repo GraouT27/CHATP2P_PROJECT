@@ -46,23 +46,32 @@ class CryptoManager:
         )
         return pem.decode("utf-8")
 
+    @staticmethod
+    def _get_local_ips() -> set[str]:
+        local_ips = {"127.0.0.1", "localhost", "::1"}
+        try:
+            import socket
+            for l_ip in socket.gethostbyname_ex(socket.gethostname())[2]:
+                local_ips.add(l_ip)
+        except Exception:
+            pass
+        return local_ips
+
+    def _alias_keys_for_peer(self, store: dict, peer_id: str, value) -> None:
+        """Lưu giá trị khóa theo peer_id và các IP cục bộ nếu cùng port (tránh lệch 127.0.0.1 vs LAN IP)."""
+        store[peer_id] = value
+        ip, _, port = peer_id.partition(":")
+        if port:
+            local_ips = self._get_local_ips()
+            if ip in local_ips:
+                for l_ip in local_ips:
+                    store[f"{l_ip}:{port}"] = value
+
     def register_peer_public_key(self, peer_id: str, pem_str: str) -> bool:
         """Đăng ký RSA Public Key của một Peer từ chuỗi PEM."""
         try:
             public_key = serialization.load_pem_public_key(pem_str.encode("utf-8"))
-            self._peer_public_keys[peer_id] = public_key
-            ip, _, port = peer_id.partition(":")
-            if port:
-                local_ips = {"127.0.0.1", "localhost", "::1"}
-                try:
-                    import socket
-                    for l_ip in socket.gethostbyname_ex(socket.gethostname())[2]:
-                        local_ips.add(l_ip)
-                except Exception:
-                    pass
-                if ip in local_ips:
-                    for l_ip in local_ips:
-                        self._peer_public_keys[f"{l_ip}:{port}"] = public_key
+            self._alias_keys_for_peer(self._peer_public_keys, peer_id, public_key)
             return True
         except Exception as e:
             log.error(f"Lỗi nạp RSA Public Key từ {peer_id}: {e}")
@@ -80,19 +89,7 @@ class CryptoManager:
 
         # Sinh 32 bytes (256 bits) ngẫu nhiên bằng bộ sinh số ngẫu nhiên an toàn của OS
         session_key = os.urandom(32)
-        self._peer_session_keys[peer_id] = session_key
-        ip, _, port = peer_id.partition(":")
-        if port:
-            local_ips = {"127.0.0.1", "localhost", "::1"}
-            try:
-                import socket
-                for l_ip in socket.gethostbyname_ex(socket.gethostname())[2]:
-                    local_ips.add(l_ip)
-            except Exception:
-                pass
-            if ip in local_ips:
-                for l_ip in local_ips:
-                    self._peer_session_keys[f"{l_ip}:{port}"] = session_key
+        self._alias_keys_for_peer(self._peer_session_keys, peer_id, session_key)
 
         encrypted_key = peer_rsa_pub.encrypt(
             session_key,
@@ -119,85 +116,48 @@ class CryptoManager:
                 ),
             )
             if len(session_key) == 32:
-                self._peer_session_keys[peer_id] = session_key
-                ip, _, port = peer_id.partition(":")
-                if port:
-                    local_ips = {"127.0.0.1", "localhost", "::1"}
-                    try:
-                        import socket
-                        for l_ip in socket.gethostbyname_ex(socket.gethostname())[2]:
-                            local_ips.add(l_ip)
-                    except Exception:
-                        pass
-                    if ip in local_ips:
-                        for l_ip in local_ips:
-                            self._peer_session_keys[f"{l_ip}:{port}"] = session_key
+                self._alias_keys_for_peer(self._peer_session_keys, peer_id, session_key)
                 return True
             return False
         except Exception as e:
             log.error(f"Không thể giải mã Session Key từ {peer_id}: {e}")
             return False
 
-    def _find_public_key(self, peer_id: str):
-        if peer_id in self._peer_public_keys:
-            return self._peer_public_keys[peer_id]
+    def _find_in_store(self, store: dict, peer_id: str):
+        """Tra cứu khóa chính xác theo IP:port (chỉ alias sang IP cục bộ khác nếu trùng đúng port)."""
+        if peer_id in store:
+            return store[peer_id]
         ip, _, port = peer_id.partition(":")
         if port:
-            local_ips = {"127.0.0.1", "localhost", "::1"}
-            try:
-                import socket
-                for l_ip in socket.gethostbyname_ex(socket.gethostname())[2]:
-                    local_ips.add(l_ip)
-            except Exception:
-                pass
+            local_ips = self._get_local_ips()
             if ip in local_ips:
                 for l_ip in local_ips:
                     cand = f"{l_ip}:{port}"
-                    if cand in self._peer_public_keys:
-                        return self._peer_public_keys[cand]
-        for pid, pub in self._peer_public_keys.items():
-            if pid.startswith(f"{ip}:"):
-                return pub
+                    if cand in store:
+                        return store[cand]
         return None
 
+    def _find_public_key(self, peer_id: str):
+        return self._find_in_store(self._peer_public_keys, peer_id)
+
     def _find_session_key(self, peer_id: str) -> Optional[bytes]:
-        if peer_id in self._peer_session_keys:
-            return self._peer_session_keys[peer_id]
-        ip, _, port = peer_id.partition(":")
-        if port:
-            local_ips = {"127.0.0.1", "localhost", "::1"}
-            try:
-                import socket
-                for l_ip in socket.gethostbyname_ex(socket.gethostname())[2]:
-                    local_ips.add(l_ip)
-            except Exception:
-                pass
-            if ip in local_ips:
-                for l_ip in local_ips:
-                    cand = f"{l_ip}:{port}"
-                    if cand in self._peer_session_keys:
-                        return self._peer_session_keys[cand]
-        for pid, key in self._peer_session_keys.items():
-            if pid.startswith(f"{ip}:"):
-                return key
-        return None
+        return self._find_in_store(self._peer_session_keys, peer_id)
 
     def has_session_key(self, peer_id: str) -> bool:
         """Kiểm tra xem đã thiết lập khóa phiên AES-256 với Peer chưa."""
         return self._find_session_key(peer_id) is not None
 
     def remove_peer_keys(self, peer_id: str):
-        """Xóa toàn bộ khóa của Peer khi ngắt kết nối (bao gồm cả các alias IP loopback/LAN)."""
+        """Xóa toàn bộ khóa của Peer khi ngắt kết nối (chỉ xóa alias cùng host & cùng port)."""
         self._peer_session_keys.pop(peer_id, None)
         self._peer_public_keys.pop(peer_id, None)
         ip, _, port = peer_id.partition(":")
         if port:
-            for k in list(self._peer_session_keys.keys()):
-                if k.endswith(f":{port}"):
-                    self._peer_session_keys.pop(k, None)
-            for k in list(self._peer_public_keys.keys()):
-                if k.endswith(f":{port}"):
-                    self._peer_public_keys.pop(k, None)
+            local_ips = self._get_local_ips()
+            if ip in local_ips:
+                for l_ip in local_ips:
+                    self._peer_session_keys.pop(f"{l_ip}:{port}", None)
+                    self._peer_public_keys.pop(f"{l_ip}:{port}", None)
 
     # ========================== AES-256-GCM ENCRYPTION ==========================
 
