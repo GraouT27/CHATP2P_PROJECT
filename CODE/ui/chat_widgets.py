@@ -41,6 +41,18 @@ class AvatarWidget(QLabel):
         self._render_avatar()
 
     def _render_avatar(self):
+        # 1. Kiểm tra cache trước khi khởi tạo QPainter để tránh rò rỉ PaintDevice
+        if self._image_path and os.path.exists(self._image_path):
+            try:
+                mtime = os.path.getmtime(self._image_path)
+            except OSError:
+                mtime = 0
+            cache_key = (self._image_path, self._size, mtime)
+            cached = _AVATAR_CACHE.get(cache_key)
+            if cached is not None and not cached.isNull():
+                self.setPixmap(cached)
+                return
+
         # Tạo QPixmap trong suốt (alpha = 0) để phần góc vuông bên ngoài hình tròn không bị đen nền.
         pixmap = QPixmap(self._size, self._size)
         pixmap.fill(QColor(0, 0, 0, 0))
@@ -48,21 +60,13 @@ class AvatarWidget(QLabel):
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Tạo đường bao tròn chuẩn kiểu float trong QRectF
-        # (PyQt6 yêu cầu int hoặc QRectF cho setClipPath/drawText, không nhận trực tiếp 4 số float rời).
         rect_f = QRectF(1.0, 1.0, float(self._size - 2), float(self._size - 2))
         path = QPainterPath()
         path.addEllipse(rect_f)
-        # setClipPath cắt bỏ mọi pixel vẽ ra ngoài hình tròn, tạo hiệu ứng Avatar bo tròn mượt.
         painter.setClipPath(path)
 
-        # 1. Nếu có file ảnh avatar hợp lệ (sử dụng bộ nhớ cache để cuộn danh sách và hiển thị tin nhắn mượt 60 FPS)
+        # 2. Nạp ảnh từ đĩa nếu có
         if self._image_path and os.path.exists(self._image_path):
-            cache_key = (self._image_path, self._size)
-            if cache_key in _AVATAR_CACHE and not _AVATAR_CACHE[cache_key].isNull():
-                self.setPixmap(_AVATAR_CACHE[cache_key])
-                return
-
             img = QPixmap(self._image_path)
             if not img.isNull():
                 scaled = img.scaled(
@@ -74,11 +78,15 @@ class AvatarWidget(QLabel):
                 y = (scaled.height() - self._size) // 2
                 painter.drawPixmap(0, 0, scaled, x, y, self._size, self._size)
                 painter.end()
-                _AVATAR_CACHE[cache_key] = pixmap
+                try:
+                    mtime = os.path.getmtime(self._image_path)
+                except OSError:
+                    mtime = 0
+                _AVATAR_CACHE[(self._image_path, self._size, mtime)] = pixmap
                 self.setPixmap(pixmap)
                 return
 
-        # 2. Vẽ hình tròn nền và chữ cái đầu
+        # 3. Vẽ hình tròn nền và chữ cái đầu
         painter.setBrush(QBrush(QColor(self._color)))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawPath(path)
@@ -94,15 +102,24 @@ class AvatarWidget(QLabel):
         self.setPixmap(pixmap)
 
     def set_name(self, name: str):
-        self._name = str(name or "")
+        new_name = str(name or "")
+        if new_name == self._name:
+            return
+        self._name = new_name
         self._render_avatar()
 
     def set_color(self, color: str):
-        self._color = color
+        new_color = color if QColor(str(color or "")).isValid() else "#1a73e8"
+        if new_color == self._color:
+            return
+        self._color = new_color
         self._render_avatar()
 
     def set_image_path(self, path: str):
-        self._image_path = str(path or "")
+        new_path = str(path or "")
+        if new_path == self._image_path and not new_path:
+            return
+        self._image_path = new_path
         self._render_avatar()
 
 
@@ -679,7 +696,13 @@ class MessageDelegate(QStyledItemDelegate):
         self._avatar_cache[key] = pm
 
     def _get_avatar(self, sender: str, avatar_path: str = "") -> QPixmap:
-        cache_key = f"{sender}_{avatar_path}"
+        mtime = 0
+        if avatar_path and os.path.exists(avatar_path):
+            try:
+                mtime = os.path.getmtime(avatar_path)
+            except OSError:
+                mtime = 0
+        cache_key = f"{sender}_{avatar_path}_{mtime}"
         if cache_key not in self._avatar_cache:
             pm = QPixmap(self.AVATAR_SIZE, self.AVATAR_SIZE)
             pm.fill(QColor(0, 0, 0, 0))
@@ -708,7 +731,8 @@ class MessageDelegate(QStyledItemDelegate):
                     return pm
 
             colors = ["#1a73e8", "#34a853", "#ea4335", "#fbbc04", "#9c27b0", "#00bcd4"]
-            c = QColor(colors[abs(hash(sender)) % len(colors)])
+            color_idx = sum(ord(ch) for ch in str(sender or "")) % len(colors)
+            c = QColor(colors[color_idx])
             p.setBrush(QBrush(c))
             p.setPen(Qt.PenStyle.NoPen)
             p.drawPath(path)
@@ -729,7 +753,11 @@ class MessageDelegate(QStyledItemDelegate):
         if msg.is_system:
             return QSize(option.rect.width(), 32)
 
-        view_w = option.rect.width() if option.rect.width() > 0 else 600
+        view_w = option.rect.width()
+        if view_w <= 0 and option.widget is not None:
+            view_w = option.widget.viewport().width() if hasattr(option.widget, "viewport") else option.widget.width()
+        if view_w <= 0:
+            view_w = 600
         max_bubble_w = int(view_w * 0.70)
         text_max_w = max_bubble_w - self.PADDING * 2
 
@@ -746,7 +774,7 @@ class MessageDelegate(QStyledItemDelegate):
         if msg.forward_from:
             height += 18  # Tiêu đề chuyển tiếp (Forward)
 
-        return QSize(view_w, max(height, self.AVATAR_SIZE + 10))
+        return QSize(view_w, max(height + 8, self.AVATAR_SIZE + 12))
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex):
         msg = index.data(Qt.ItemDataRole.DisplayRole)

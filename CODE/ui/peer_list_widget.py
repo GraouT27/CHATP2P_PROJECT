@@ -52,9 +52,9 @@ class PeerItemWidget(QWidget):
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(10)
 
-        # Avatar
+        # Avatar (cố định căn giữa dọc để không bị nhảy khi hiện last_msg_label)
         self.avatar = AvatarWidget(self.username, size=38, image_path=self.avatar_path)
-        layout.addWidget(self.avatar)
+        layout.addWidget(self.avatar, 0, Qt.AlignmentFlag.AlignVCenter)
 
         # Info
         info_layout = QVBoxLayout()
@@ -78,9 +78,9 @@ class PeerItemWidget(QWidget):
         self.addr_label.setToolTip(f"Địa chỉ TCP: {self.ip}:{self.port}")
         info_layout.addWidget(self.addr_label)
 
-        self.last_msg_label = QLabel("")
+        self.last_msg_label = QLabel("Chưa có tin nhắn")
         self.last_msg_label.setStyleSheet("color: #b0b0c8; font-size: 11px;")
-        self.last_msg_label.setVisible(False)
+        self.last_msg_label.setFixedHeight(15)
         info_layout.addWidget(self.last_msg_label)
 
         layout.addLayout(info_layout, 1)
@@ -88,9 +88,10 @@ class PeerItemWidget(QWidget):
     def set_status(self, status: str):
         """
         Cập nhật trạng thái Online/Offline và ép Qt nạp lại style QSS.
-        Lý do phải dùng unpolish() rồi polish(): trong Qt, khi thay đổi dynamic property
-        ([status="offline"]), QSS không tự vẽ lại màu ngay mà cần tháo/nạp lại style.
+        Chỉ unpolish/polish khi status thực sự thay đổi để tránh nhấp nháy UI.
         """
+        if status == self.status:
+            return
         self.status = status
         self.status_label.setText(status.capitalize())
         self.status_label.setProperty("status", status)
@@ -103,20 +104,28 @@ class PeerItemWidget(QWidget):
 
     def set_username(self, name: str):
         safe = str(name or "Peer")
+        if safe == self.username:
+            return
         self.username = safe
         self.name_label.setText(safe)
+        self.name_label.setToolTip(safe)
         self.avatar.set_name(safe)
 
     def update_endpoint(self, ip: str, port: int):
         """Cập nhật lại IP và cổng mạng của Peer khi khởi động lại hoặc chuyển cổng."""
+        if ip == self.ip and port == self.port:
+            return
         self.ip = ip
         self.port = port
         self.addr_label.setText(f"{self.ip}:{self.port}")
         self.addr_label.setToolTip(f"Địa chỉ TCP: {self.ip}:{self.port}")
 
     def set_avatar_path(self, path: str):
-        self.avatar_path = path
-        self.avatar.set_image_path(path)
+        new_path = str(path or "")
+        if new_path == self.avatar_path:
+            return
+        self.avatar_path = new_path
+        self.avatar.set_image_path(new_path)
 
     def set_last_message(self, text: str):
         # Loại bỏ \r và \n để nội dung xem trước luôn nằm gọn trên 1 dòng, tránh vỡ chiều cao item.
@@ -124,11 +133,11 @@ class PeerItemWidget(QWidget):
         if clean:
             disp = clean if len(clean) <= 26 else clean[:26] + "..."
             self.last_msg_label.setText(disp)
-            self.last_msg_label.setVisible(True)
 
 
 class PeerListWidget(QWidget):
     """Toàn bộ khung danh sách Peer bên trái."""
+    GROUP_CHAT_ID = "GROUP_ALL"
     peer_selected = pyqtSignal(str)              # (peer_id)
     connect_clicked = pyqtSignal()               # Mở hộp thoại kết nối thủ công
     settings_clicked = pyqtSignal()              # Mở cấu hình
@@ -139,7 +148,26 @@ class PeerListWidget(QWidget):
         self.username = username
         self.port = port
         self._peer_widgets: dict[str, PeerItemWidget] = {}
+        self._group_widget: PeerItemWidget | None = None
         self._setup_ui()
+
+    def ensure_group_room(self):
+        """Thêm phòng chat nhóm chung (Full Mesh tới tất cả Peer online) ở đầu danh sách."""
+        if self._group_widget is not None:
+            return
+        item = QListWidgetItem()
+        item.setData(Qt.ItemDataRole.UserRole, self.GROUP_CHAT_ID)
+        item.setSizeHint(QSize(280, 68))
+        self.list_widget.insertItem(0, item)
+
+        widget = PeerItemWidget(
+            self.GROUP_CHAT_ID, "📢 Nhóm Chung (Tất cả)", "Full Mesh", 0, "online", "", self.list_widget
+        )
+        widget.addr_label.setText("Gửi tới mọi Peer đang Online")
+        widget.addr_label.setToolTip("Phòng chat nhóm Full Mesh tới tất cả Peer")
+        self.list_widget.setItemWidget(item, widget)
+        self._group_widget = widget
+        self._peer_widgets[self.GROUP_CHAT_ID] = widget
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -231,9 +259,9 @@ class PeerListWidget(QWidget):
                 either_placeholder = widget.username.startswith("Peer_") or username.startswith("Peer_")
 
                 # Trùng nếu:
-                # 1) Cùng tên thật (AliceTest, Bob, ...) -> luôn đại diện cho cùng 1 người, không nhân bản
-                # 2) HOẶC cùng port (khi kết nối qua loopback / LAN IP / placeholder)
-                if same_real_name or (same_port and (same_host or either_placeholder)):
+                # 1) Cùng tên thật trên cùng host (hoặc cùng endpoint IP:Port)
+                # 2) Cùng port VÀ cùng host (tránh gộp nhầm 2 máy LAN khác nhau cùng dùng port 9001)
+                if (same_real_name and (same_host or widget.ip == ip)) or (same_port and same_host):
                     matched_widget = widget
                     matched_pid = existing_pid
                     break

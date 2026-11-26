@@ -9,7 +9,7 @@ import time
 import base64
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QTimer, QSize
+from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal
 from PyQt6.QtGui import QFont, QAction, QClipboard, QImage
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -42,6 +42,7 @@ from ui.dnd import DragDropFilter
 
 class MainWindow(QMainWindow):
     """Cửa sổ chính của ứng dụng Chat P2P."""
+    _chat_send_result = pyqtSignal(str, bool, str)  # (peer_id, ok, err)
 
     def __init__(self, username: str = None, listen_port: int = None, demo_mode: bool = False):
         super().__init__()
@@ -86,6 +87,7 @@ class MainWindow(QMainWindow):
 
         # 4. Xây dựng giao diện
         self._setup_ui()
+        self.peer_list_panel.ensure_group_room()
         self._setup_menu()
         self._bind_signals()
 
@@ -169,6 +171,7 @@ class MainWindow(QMainWindow):
         self.message_view.setObjectName("messageListView")
         self.message_delegate = MessageDelegate(self.message_view)
         self.message_view.setItemDelegate(self.message_delegate)
+        self.message_view.setResizeMode(QListView.ResizeMode.Adjust)
         self.message_view.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
         self.message_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.message_view.customContextMenuRequested.connect(self._show_message_context_menu)
@@ -281,6 +284,9 @@ class MainWindow(QMainWindow):
         self.transfer_mgr.task_completed.connect(self._on_file_task_completed)
         self.transfer_mgr.task_failed.connect(self._on_file_task_failed)
 
+        # Async Chat Send Result (thread-safe về Main GUI Thread)
+        self._chat_send_result.connect(self._on_chat_send_result)
+
     # ========================== EVENT HANDLERS ==========================
 
     def _on_server_started(self, port: int):
@@ -349,7 +355,7 @@ class MainWindow(QMainWindow):
             same_port = (port > 0 and info.get("port") == port)
             is_placeholder = existing_name.startswith("Peer_") or safe_name.startswith("Peer_")
 
-            if same_real_name or (same_port and (same_host or is_placeholder)):
+            if (same_real_name and (same_host or info.get("ip") == ip)) or (same_port and same_host):
                 found_pid = existing_pid
                 break
 
@@ -556,7 +562,7 @@ class MainWindow(QMainWindow):
             same_port = (actual_port > 0 and info.get("port") == actual_port)
             is_placeholder = existing_name.startswith("Peer_") or safe_username.startswith("Peer_")
 
-            if same_real_name or (same_port and (same_host or is_placeholder)):
+            if (same_real_name and (same_host or info.get("ip") == ip)) or (same_port and same_host):
                 target_pid = existing_pid
                 break
 
@@ -569,7 +575,7 @@ class MainWindow(QMainWindow):
 
         old_info = self._peer_info_map.get(target_pid, {})
         final_avatar = avatar_path or old_info.get("avatar_path", "")
-        dest_ip = old_info.get("ip", ip)
+        dest_ip = ip if ip and ip not in ("0.0.0.0", "") else old_info.get("ip", ip)
         info_dict = {
             "ip": dest_ip, "port": actual_port, "username": safe_username,
             "status": "online", "avatar_path": final_avatar
@@ -592,31 +598,32 @@ class MainWindow(QMainWindow):
 
         if self._current_peer_id == target_pid:
             self.header_name_label.setText(safe_username)
-            if final_avatar:
-                self.header_avatar.set_image_path(final_avatar)
+            self.header_avatar.set_name(safe_username)
+            self.header_avatar.set_image_path(final_avatar)
 
-        # Chỉ bên nhận gói handshake ban đầu (is_ack=False) mới phản hồi handshake_ack và sinh session key.
-        # Lý do: Nếu xử lý handshake_ack mà lại tiếp tục gửi handshake_ack hoặc sinh đè khóa mới,
-        # hai máy sẽ bị lặp vô tận (handshake loop) hoặc làm lệch khóa AES-256 giữa 2 chiều.
+        # Chỉ bên nhận handshake ban đầu (is_ack=False) mới phản hồi handshake_ack.
+        my_pub_key = self.crypto_mgr.get_public_key_pem()
         if not is_ack:
             ack_h = make_handshake_ack_header(
                 self.username,
-                self.crypto_mgr.get_public_key_pem(),
+                my_pub_key,
                 avatar_b64=self._read_my_avatar_b64(),
                 # Bắt buộc đính kèm listen_port của mình để bên khởi tạo map đúng IP:listen_port (tránh tạo Ghost Peer).
                 listen_port=self.listen_port,
             )
             send_message_direct_async(ip, actual_port, ack_h)
 
-            if not self.crypto_mgr.has_session_key(target_pid):
-                enc_session_key = self.crypto_mgr.generate_and_encrypt_session_key(target_pid)
-                if enc_session_key:
-                    if target_pid != canonical_peer_id and self.crypto_mgr.has_session_key(target_pid):
-                        self.crypto_mgr._peer_session_keys[canonical_peer_id] = self.crypto_mgr._peer_session_keys[target_pid]
-                    key_h = make_key_exchange_header(
-                        self.username, enc_session_key, listen_port=self.listen_port
-                    )
-                    send_message_direct_async(ip, actual_port, key_h)
+        # Quy ước tie-breaker tất định theo khóa RSA công khai để tránh 2 máy cùng lúc sinh 2 khóa AES-256 lệch nhau
+        should_init_key = (my_pub_key > pub_key) if (pub_key and my_pub_key != pub_key) else (not is_ack)
+        if should_init_key and not self.crypto_mgr.has_session_key(target_pid):
+            enc_session_key = self.crypto_mgr.generate_and_encrypt_session_key(target_pid)
+            if enc_session_key:
+                if target_pid != canonical_peer_id and self.crypto_mgr.has_session_key(target_pid):
+                    self.crypto_mgr._peer_session_keys[canonical_peer_id] = self.crypto_mgr._peer_session_keys[target_pid]
+                key_h = make_key_exchange_header(
+                    self.username, enc_session_key, listen_port=self.listen_port
+                )
+                send_message_direct_async(ip, actual_port, key_h)
 
         self._add_system_message(target_pid, f"🔒 Đã thiết lập kênh bảo mật RSA/AES-256 với {safe_username}.")
 
@@ -625,6 +632,31 @@ class MainWindow(QMainWindow):
 
     def _on_peer_selected(self, peer_id: str):
         self._current_peer_id = peer_id
+        if peer_id == PeerListWidget.GROUP_CHAT_ID:
+            online_cnt = len({
+                (info.get("ip"), info.get("port"))
+                for info in self._peer_info_map.values()
+                if info.get("status") == "online"
+            })
+            self.header_name_label.setText("📢 Nhóm Chung (Full Mesh P2P)")
+            self.header_status_label.setText(f"Online ({online_cnt} Peer)")
+            self.header_status_label.setProperty("status", "online")
+            self.header_status_label.style().unpolish(self.header_status_label)
+            self.header_status_label.style().polish(self.header_status_label)
+            self.header_avatar.set_name("G")
+            self.header_avatar.set_image_path("")
+
+            self.send_btn.setEnabled(True)
+            self.attach_btn.setEnabled(False)
+            self.header_attach_btn.setEnabled(False)
+            self.input_field.setEnabled(True)
+            self.input_field.setPlaceholderText("Nhập tin nhắn gửi tới TẤT CẢ Peer đang Online... (Enter để gửi)")
+            if peer_id not in self._message_models:
+                self._message_models[peer_id] = MessageListModel(self)
+            self.message_view.setModel(self._message_models[peer_id])
+            QTimer.singleShot(0, self.message_view.scrollToBottom)
+            return
+
         info = self._peer_info_map.get(peer_id, {})
         username = info.get("username", peer_id)
         status = info.get("status", "online")
@@ -636,8 +668,7 @@ class MainWindow(QMainWindow):
         self.header_status_label.style().unpolish(self.header_status_label)
         self.header_status_label.style().polish(self.header_status_label)
         self.header_avatar.set_name(username)
-        if avatar_path:
-            self.header_avatar.set_image_path(avatar_path)
+        self.header_avatar.set_image_path(avatar_path)
 
         is_online = (status == "online")
         self.send_btn.setEnabled(is_online)
@@ -686,7 +717,59 @@ class MainWindow(QMainWindow):
         if not text or not self._current_peer_id:
             return
 
-        info = self._peer_info_map.get(self._current_peer_id)
+        target_pid = self._current_peer_id
+        reply_data = self.reply_preview.get_reply_data()
+
+        # Nhánh 1: Gửi tin nhắn nhóm tới TẤT CẢ Peer đang Online (Full Mesh, mỗi Peer dùng khóa AES-256 riêng)
+        if target_pid == PeerListWidget.GROUP_CHAT_ID:
+            unique_targets: dict[tuple[str, int], str] = {}
+            for pid, info in self._peer_info_map.items():
+                if info.get("status") == "online":
+                    ep = (info["ip"], info["port"])
+                    if ep not in unique_targets:
+                        unique_targets[ep] = pid
+
+            if not unique_targets:
+                QMessageBox.warning(self, "Chưa có Peer", "Hiện chưa có Peer nào Online để gửi tin nhắn nhóm!")
+                return
+
+            if target_pid not in self._message_models:
+                self._message_models[target_pid] = MessageListModel(self)
+                self.message_view.setModel(self._message_models[target_pid])
+
+            first_ts = time.time()
+            for (ip, port), pid in unique_targets.items():
+                text_to_header, is_encrypted, nonce_str = self._encrypt_text_if_ready(pid, text)
+                header = make_chat_header(
+                    username=self.username,
+                    text=text_to_header,
+                    reply_to=reply_data,
+                    is_encrypted=is_encrypted,
+                    nonce=nonce_str,
+                )
+                header["sender_port"] = self.listen_port
+                header["group_id"] = PeerListWidget.GROUP_CHAT_ID
+                first_ts = header["timestamp"]
+                send_message_direct_async(ip, port, header, b"")
+
+            msg = MessageData(
+                msg_id=f"grp_{first_ts}",
+                sender=self.username,
+                content=text,
+                timestamp=first_ts,
+                is_sent=True,
+                reply_to=reply_data,
+                avatar_path=self.avatar_path,
+            )
+            self._message_models[target_pid].add_message(msg)
+            self.peer_list_panel.update_last_message(target_pid, f"Bạn: {text}")
+            QTimer.singleShot(0, self.message_view.scrollToBottom)
+            self.input_field.clear()
+            self.reply_preview.clear()
+            return
+
+        # Nhánh 2: Gửi tin nhắn riêng 1-1
+        info = self._peer_info_map.get(target_pid)
         if not info or info.get("status") != "online":
             QMessageBox.warning(self, "Không thể gửi", "Peer đang Offline!")
             return
@@ -694,9 +777,8 @@ class MainWindow(QMainWindow):
         ip = info["ip"]
         port = info["port"]
 
-        reply_data = self.reply_preview.get_reply_data()
         text_to_header, is_encrypted, nonce_str = self._encrypt_text_if_ready(
-            self._current_peer_id, text
+            target_pid, text
         )
 
         header = make_chat_header(
@@ -708,13 +790,13 @@ class MainWindow(QMainWindow):
         )
         header["sender_port"] = self.listen_port
 
-        ok, err = send_message_direct(ip, port, header, b"")
-        if not ok:
-            self._on_peer_disconnected(self._current_peer_id)
-            QMessageBox.warning(self, "Lỗi Gửi Tin Nhắn", f"Không thể gửi tới {self._current_peer_id}:\n{err}")
-            return
+        # Đảm bảo model đã tồn tại trước khi thêm tin nhắn (chống KeyError)
+        if target_pid not in self._message_models:
+            self._message_models[target_pid] = MessageListModel(self)
+            if self._current_peer_id == target_pid:
+                self.message_view.setModel(self._message_models[target_pid])
 
-        # Hiển thị trên UI của mình
+        # Hiển thị ngay trên UI của mình và gửi qua luồng nền để không làm đơ Main GUI Thread
         msg = MessageData(
             msg_id=header["msg_id"],
             sender=self.username,
@@ -724,20 +806,45 @@ class MainWindow(QMainWindow):
             reply_to=reply_data,
             avatar_path=self.avatar_path,
         )
-        self._message_models[self._current_peer_id].add_message(msg)
-        self.peer_list_panel.update_last_message(self._current_peer_id, f"Bạn: {text}")
-        self.message_view.scrollToBottom()
+        self._message_models[target_pid].add_message(msg)
+        self.peer_list_panel.update_last_message(target_pid, f"Bạn: {text}")
+        QTimer.singleShot(0, self.message_view.scrollToBottom)
 
         self.input_field.clear()
         self.reply_preview.clear()
+
+        send_message_direct_async(
+            ip, port, header, b"",
+            callback=lambda ok, err, pid=target_pid: self._chat_send_result.emit(pid, ok, err)
+        )
+
+    def _on_chat_send_result(self, peer_id: str, ok: bool, err: str):
+        """Nhận kết quả gửi tin nhắn từ luồng nền trên Main GUI Thread."""
+        if not ok:
+            self._on_peer_disconnected(peer_id)
+            QMessageBox.warning(self, "Lỗi Gửi Tin Nhắn", f"Không thể gửi tới {peer_id}:\n{err}")
 
     def _on_chat_received(self, peer_id: str, data: dict):
         canonical_peer_id = self._find_canonical_peer_id(
             peer_id, data.get("sender", ""), data.get("sender_port", 0)
         )
 
-        if canonical_peer_id not in self._message_models:
-            self._message_models[canonical_peer_id] = MessageListModel(self)
+        content_text = data.get("content") or ""
+        # Nếu giải mã lỗi (sai khóa/chưa kịp đồng bộ khóa), tự động bắt tay lại với Peer đó
+        if isinstance(content_text, str) and content_text.startswith("🔒 [Lỗi giải mã"):
+            info_err = self._peer_info_map.get(canonical_peer_id)
+            if info_err:
+                self.crypto_mgr.remove_peer_keys(canonical_peer_id)
+                self._send_handshake(canonical_peer_id, info_err["ip"], info_err["port"])
+
+        target_room_id = (
+            PeerListWidget.GROUP_CHAT_ID
+            if data.get("group_id") == PeerListWidget.GROUP_CHAT_ID
+            else canonical_peer_id
+        )
+
+        if target_room_id not in self._message_models:
+            self._message_models[target_room_id] = MessageListModel(self)
 
         info = self._peer_info_map.get(canonical_peer_id, {})
         peer_avatar = info.get("avatar_path", "")
@@ -745,18 +852,18 @@ class MainWindow(QMainWindow):
         msg = MessageData(
             msg_id=data.get("msg_id"),
             sender=self._sanitize_username(data.get("sender")),
-            content=data.get("content"),
+            content=content_text,
             timestamp=data.get("timestamp"),
             is_sent=False,
             reply_to=data.get("reply_to"),
             forward_from=data.get("forward_from"),
             avatar_path=peer_avatar,
         )
-        self._message_models[canonical_peer_id].add_message(msg)
-        self.peer_list_panel.update_last_message(canonical_peer_id, data.get("content"))
+        self._message_models[target_room_id].add_message(msg)
+        self.peer_list_panel.update_last_message(target_room_id, content_text)
 
-        if self._current_peer_id == canonical_peer_id:
-            self.message_view.scrollToBottom()
+        if self._current_peer_id == target_room_id:
+            QTimer.singleShot(0, self.message_view.scrollToBottom)
 
     def _add_system_message(self, peer_id: str, content: str):
         if peer_id not in self._message_models:
@@ -771,7 +878,7 @@ class MainWindow(QMainWindow):
         )
         self._message_models[peer_id].add_message(msg)
         if self._current_peer_id == peer_id:
-            self.message_view.scrollToBottom()
+            QTimer.singleShot(0, self.message_view.scrollToBottom)
 
     # ========================== TRUYỀN FILE ==========================
 

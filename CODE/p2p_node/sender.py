@@ -327,10 +327,15 @@ def send_message_direct(ip: str, port: int, header: dict, payload: bytes = b"") 
     sock.settimeout(CONNECT_TIMEOUT)
 
     try:
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         sock.connect((ip, port))
         sock.settimeout(SOCKET_TIMEOUT)
         data = pack_message(header, payload)
         sock.sendall(data)
+        try:
+            sock.shutdown(socket.SHUT_WR)
+        except OSError:
+            pass
         return True, "OK"
     except (socket.timeout, TimeoutError):
         err = f"Hết thời gian chờ kết nối tới {ip}:{port}"
