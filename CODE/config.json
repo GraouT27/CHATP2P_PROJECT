@@ -3,7 +3,7 @@
   "listen_port": 9001,
   "discovery_enabled": true,
   "avatar_path": "",
-  "download_dir": "C:\\Users\\Acer\\AppData\\Local\\Temp\\pytest-of-Acer\\pytest-142\\test_tc1_p2p_two_independent_p0\\dl_a",
+  "download_dir": "C:\\Users\\Acer\\AppData\\Local\\Temp\\pytest-of-Acer\\pytest-157\\test_tc1_p2p_two_independent_p0\\dl_a",
   "chunk_size": 65536,
   "max_concurrent": 3
 }

@@ -113,24 +113,24 @@ def test_file_recall_and_delete_feature(tmp_path):
     from security.crypto_manager import CryptoManager
 
     # 1. Kiểm tra cấu trúc header gói tin file_delete
-    h = make_file_delete_header("Alice", "test_doc.pptx", file_id="task_123")
+    h = make_file_delete_header("Alice", "test_doc.docx", file_id="task_123")
     is_valid, err = validate_header(h)
     assert is_valid, f"Header file_delete không hợp lệ: {err}"
     assert h["type"] == "file_delete"
-    assert h["file_name"] == "test_doc.pptx"
+    assert h["file_name"] == "test_doc.docx"
 
     # 2. Giả lập file tồn tại trong thư mục tải về của Receiver
     download_dir = str(tmp_path / "received")
     os.makedirs(download_dir, exist_ok=True)
-    fake_file = os.path.join(download_dir, "test_doc.pptx")
+    fake_file = os.path.join(download_dir, "test_doc.docx")
     with open(fake_file, "wb") as f:
-        f.write(b"Slide presentation content")
+        f.write(b"Document presentation content")
     assert os.path.exists(fake_file)
 
     # 3. Khi nhận yêu cầu thu hồi / xóa -> xóa sạch file vật lý
     crypto_mgr = CryptoManager()
     mgr = TransferManager(crypto_mgr, download_dir=download_dir, listen_port=9001)
-    deleted = mgr.delete_transferred_file("test_doc.pptx", file_id="task_123")
+    deleted = mgr.delete_transferred_file("test_doc.docx", file_id="task_123")
     assert deleted is True
     assert not os.path.exists(fake_file), "File vẫn còn tồn tại sau khi bị thu hồi!"
 
