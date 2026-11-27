@@ -1138,13 +1138,21 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             selected = dlg.get_selected_peers()
             sent_count = 0
+            # Giữ nguyên tên người gửi gốc nếu tin nhắn này vốn đã là tin chuyển tiếp
+            orig_sender = (
+                msg.forward_from.get("original_sender")
+                if isinstance(msg.forward_from, dict) and msg.forward_from.get("original_sender")
+                else msg.sender
+            )
+            fwd_from = {
+                "original_sender": self._sanitize_username(orig_sender),
+                "forwarded_by": self.username,
+            }
+
             for pid in selected:
                 info = self._peer_info_map.get(pid)
                 if info and info.get("status") == "online":
                     text_to_header, is_encrypted, nonce_str = self._encrypt_text_if_ready(pid, msg.content)
-                    # Bảo mật Forward: KHÔNG nhúng 'original_content' bản rõ vào forward_from vì JSON Header
-                    # đi qua mạng không bị mã hóa toàn phần; chỉ giữ 'original_sender' để UI hiển thị dòng trích dẫn.
-                    fwd_from = {"original_sender": self._sanitize_username(msg.sender)}
                     h = make_chat_header(
                         self.username,
                         text_to_header,
@@ -1154,11 +1162,29 @@ class MainWindow(QMainWindow):
                     )
                     # Gắn sender_port để Peer nhận biết đúng Canonical ID khi giải mã gói Forward.
                     h["sender_port"] = self.listen_port
-                    ok, err = send_message_direct(info["ip"], info["port"], h)
-                    if ok:
-                        sent_count += 1
-                    else:
-                        log.warning(f"Chuyển tiếp tới {pid} thất bại: {err}")
+
+                    # Lưu và hiển thị ngay tin nhắn vừa chuyển tiếp vào lịch sử cuộc trò chuyện đích (Alice <-> Bob)
+                    if pid not in self._message_models:
+                        self._message_models[pid] = MessageListModel(self)
+                    fwd_msg = MessageData(
+                        msg_id=h["msg_id"],
+                        sender=self.username,
+                        content=msg.content,
+                        timestamp=h["timestamp"],
+                        is_sent=True,
+                        forward_from=fwd_from,
+                        avatar_path=self.avatar_path,
+                    )
+                    self._message_models[pid].add_message(fwd_msg)
+                    self.peer_list_panel.update_last_message(pid, f"↪ Bạn: {msg.content}")
+                    if self._current_peer_id == pid:
+                        QTimer.singleShot(0, self.message_view.scrollToBottom)
+
+                    send_message_direct_async(
+                        info["ip"], info["port"], h, b"",
+                        callback=lambda ok, err, target=pid: self._chat_send_result.emit(target, ok, err)
+                    )
+                    sent_count += 1
             self.statusBar().showMessage(f"↪ Đã chuyển tiếp tin nhắn tới {sent_count}/{len(selected)} Peer")
 
     # ========================== DIALOGS & EMOJI ==========================
