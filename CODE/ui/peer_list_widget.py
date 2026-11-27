@@ -353,6 +353,8 @@ class PeerListWidget(QWidget):
         seen_widgets = set()
         res = []
         for pid, w in self._peer_widgets.items():
+            if pid == self.GROUP_CHAT_ID or w.peer_id == self.GROUP_CHAT_ID:
+                continue
             if w not in seen_widgets:
                 seen_widgets.add(w)
                 if not online_only or w.status == "online":

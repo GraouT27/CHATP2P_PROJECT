@@ -598,6 +598,9 @@ class MessageData:
         self.is_system = bool(is_system)
         self.avatar_path = str(avatar_path or "")
 
+    def __str__(self) -> str:
+        return self.content
+
     @property
     def time_str(self) -> str:
         import time
@@ -631,7 +634,12 @@ class MessageListModel(QAbstractListModel):
     def data(self, index: QModelIndex, role=Qt.ItemDataRole.DisplayRole):
         if not index.isValid() or index.row() >= len(self._messages):
             return None
-        return self._messages[index.row()]
+        msg = self._messages[index.row()]
+        if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.UserRole):
+            return msg
+        if role in (Qt.ItemDataRole.ToolTipRole, Qt.ItemDataRole.AccessibleTextRole, Qt.ItemDataRole.EditRole):
+            return msg.content
+        return None
 
     def add_message(self, msg: MessageData):
         # Xóa bớt tin nhắn cũ nhất (FIFO) nếu chạm ngưỡng MAX_MESSAGES và báo beginRemoveRows cho QListView đồng bộ.
@@ -804,7 +812,7 @@ class MessageDelegate(QStyledItemDelegate):
         text_rect = fm.boundingRect(0, 0, text_max_w, 10000, Qt.TextFlag.TextWordWrap, content_str)
 
         # Tính toán chiều rộng tối thiểu để bong bóng không bị bóp nghẹt khi text ngắn
-        min_bubble_w = 220 if msg.reply_to else (130 if not msg.is_sent else 75)
+        min_bubble_w = 230 if (msg.reply_to or msg.forward_from) else (130 if not msg.is_sent else 75)
         bubble_w = max(min(text_rect.width() + self.PADDING * 2 + 16, max_bubble_w), min_bubble_w)
         bubble_h = self.PADDING * 2 + text_rect.height() + 18
         if not msg.is_sent:
@@ -845,9 +853,16 @@ class MessageDelegate(QStyledItemDelegate):
             f_font.setItalic(True)
             painter.setFont(f_font)
             orig = str(msg.forward_from.get("original_sender") or "ai đó")[:64]
+            fwd_by = str(msg.forward_from.get("forwarded_by") or "").strip()[:64]
+            if msg.is_sent:
+                fwd_label = f"↪ Đã chuyển tiếp từ {orig}"
+            elif fwd_by and fwd_by.lower() != orig.lower():
+                fwd_label = f"↪ {fwd_by} đã chuyển tiếp từ {orig}"
+            else:
+                fwd_label = f"↪ Chuyển tiếp từ {orig}"
             painter.drawText(
                 QRectF(float(bubble_x + self.PADDING), float(text_y), float(bubble_w - self.PADDING * 2), 14.0),
-                Qt.AlignmentFlag.AlignLeft, f"↪ Chuyển tiếp từ {orig}"
+                Qt.AlignmentFlag.AlignLeft, fwd_label
             )
             text_y += 18
 

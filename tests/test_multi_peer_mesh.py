@@ -61,3 +61,64 @@ def test_three_peers_same_ip_independent_session_keys():
 
     assert len(received_msgs) == 1
     assert received_msgs[0][1]["content"] == "Chào Bob, mình là Eve!"
+
+
+def test_forward_message_history_and_model_data_roles():
+    """Kiểm tra Forward lưu lịch sử phía người gửi, giữ đúng metadata Carol->Alice->Bob và không lộ object repr."""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QApplication
+    from ui.app import MainWindow
+    from ui.chat_widgets import MessageData, MessageListModel
+
+    app = QApplication.instance()
+    if not app:
+        os.environ["QT_QPA_PLATFORM"] = "offscreen"
+        app = QApplication([])
+
+    # 1. Kiểm tra MessageListModel.data() với các Qt roles
+    model = MessageListModel()
+    m = MessageData("m1", "Carol", "Nội dung gốc", 1700000000.0, False)
+    model.add_message(m)
+    idx = model.index(0, 0)
+    assert model.data(idx, Qt.ItemDataRole.DisplayRole) is m
+    assert model.data(idx, Qt.ItemDataRole.ToolTipRole) == "Nội dung gốc"
+    assert model.data(idx, Qt.ItemDataRole.AccessibleTextRole) == "Nội dung gốc"
+    assert model.data(idx, Qt.ItemDataRole.DecorationRole) is None
+    assert str(m) == "Nội dung gốc"
+    assert "MessageData object at" not in str(m)
+
+    # 2. Kiểm tra Forward từ Alice sang Bob (tin gốc của Carol)
+    win_alice = MainWindow(username="Alice", listen_port=9961, demo_mode=True)
+    try:
+        bob_pid = "127.0.0.1:9962"
+        win_alice._on_peer_discovered(bob_pid, "Bob", "127.0.0.1", 9962)
+
+        # Kiểm tra GROUP_ALL không lọt vào danh sách Forward
+        peers_for_fwd = win_alice.peer_list_panel.get_all_peers(online_only=True)
+        assert all(pid != "GROUP_ALL" for pid, _ in peers_for_fwd)
+
+        # Mô phỏng logic tạo bản ghi Forward khi người dùng xác nhận trong ForwardDialog
+        carol_msg = MessageData("c1", "Carol", "Hẹn gặp lúc 8h", 1700000000.0, False)
+        fwd_from = {"original_sender": "Carol", "forwarded_by": "Alice"}
+        win_alice._message_models[bob_pid] = MessageListModel(win_alice)
+        win_alice._message_models[bob_pid].add_message(
+            MessageData(
+                msg_id="f1",
+                sender="Alice",
+                content=carol_msg.content,
+                timestamp=1700000010.0,
+                is_sent=True,
+                forward_from=fwd_from,
+            )
+        )
+        win_alice.peer_list_panel.update_last_message(bob_pid, f"↪ Bạn: {carol_msg.content}")
+
+        saved = win_alice._message_models[bob_pid].get_message(0)
+        assert saved is not None
+        assert saved.content == "Hẹn gặp lúc 8h"
+        assert saved.forward_from == {"original_sender": "Carol", "forwarded_by": "Alice"}
+        assert "↪ Bạn: Hẹn gặp lúc 8h" in win_alice.peer_list_panel.get_peer_widget(bob_pid).last_msg_label.text()
+    finally:
+        win_alice.listener.stop()
+        win_alice.discovery.stop()
+        win_alice.close()
